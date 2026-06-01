@@ -33,6 +33,8 @@ const FRAME_HATCH  = 6;    // px between geometric lines (smaller = denser)
 
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
+const fcanvas = document.createElement('canvas');   // cached static cockpit frame
+const fctx = fcanvas.getContext('2d');
 let W=0, H=0, DPR=1;
 function resize(){
   const r = canvas.getBoundingClientRect();
@@ -40,6 +42,9 @@ function resize(){
   W = Math.max(2, Math.floor(r.width)); H = Math.max(2, Math.floor(r.height));
   canvas.width = Math.floor(W*DPR); canvas.height = Math.floor(H*DPR);
   ctx.setTransform(DPR,0,0,DPR,0,0);
+  if(FRAME){ fcanvas.width=canvas.width; fcanvas.height=canvas.height;
+    fctx.setTransform(DPR,0,0,DPR,0,0); fctx.clearRect(0,0,W,H); drawFrame(fctx); }
+  idlePainted=false;
 }
 window.addEventListener('resize', resize);
 
@@ -76,70 +81,70 @@ function handPose(lm){
 }
 
 // thin geometric border: 3 concentric rails + dense perpendicular rungs + diagonal hatch
-function drawFrame(){
+function drawFrame(g){
   const m=FRAME_MARGIN, b=FRAME_BAND, h=FRAME_HATCH;
   const oL=m, oT=m, oR=W-m, oB=H-m;            // outer rail (hull)
   const iL=m+b, iT=m+b, iR=W-m-b, iB=H-m-b;    // inner rail (opening)
-  ctx.save();
-  ctx.shadowColor='#ff3ec9'; ctx.shadowBlur=4; ctx.lineCap='butt'; ctx.lineJoin='miter';
+  g.save();
+  g.shadowColor='#ff3ec9'; g.shadowBlur=4; g.lineCap='butt'; g.lineJoin='miter';
 
   // diagonal hatch filling the band (parallel struts) — drawn first, dim
-  ctx.strokeStyle='rgba(255,62,201,0.30)'; ctx.lineWidth=1;
-  ctx.beginPath();
+  g.strokeStyle='rgba(255,62,201,0.30)'; g.lineWidth=1;
+  g.beginPath();
   for(let x=oL-b; x<=oR; x+=h){
-    ctx.moveTo(x,oT);  ctx.lineTo(x+b,iT);     // top
-    ctx.moveTo(x,iB);  ctx.lineTo(x+b,oB);     // bottom
+    g.moveTo(x,oT);  g.lineTo(x+b,iT);     // top
+    g.moveTo(x,iB);  g.lineTo(x+b,oB);     // bottom
   }
   for(let y=oT-b; y<=oB; y+=h){
-    ctx.moveTo(oL,y);  ctx.lineTo(iL,y+b);     // left
-    ctx.moveTo(iR,y);  ctx.lineTo(oR,y+b);     // right
+    g.moveTo(oL,y);  g.lineTo(iL,y+b);     // left
+    g.moveTo(iR,y);  g.lineTo(oR,y+b);     // right
   }
-  ctx.stroke();
+  g.stroke();
 
   // dense perpendicular rungs across the band (cyan)
-  ctx.strokeStyle='rgba(63,207,255,0.55)'; ctx.lineWidth=1;
-  ctx.beginPath();
-  for(let x=oL; x<=oR; x+=h){ ctx.moveTo(x,oT); ctx.lineTo(x,iT); ctx.moveTo(x,iB); ctx.lineTo(x,oB); }
-  for(let y=oT; y<=oB; y+=h){ ctx.moveTo(oL,y); ctx.lineTo(iL,y); ctx.moveTo(iR,y); ctx.lineTo(oR,y); }
-  ctx.stroke();
+  g.strokeStyle='rgba(63,207,255,0.55)'; g.lineWidth=1;
+  g.beginPath();
+  for(let x=oL; x<=oR; x+=h){ g.moveTo(x,oT); g.lineTo(x,iT); g.moveTo(x,iB); g.lineTo(x,oB); }
+  for(let y=oT; y<=oB; y+=h){ g.moveTo(oL,y); g.lineTo(iL,y); g.moveTo(iR,y); g.lineTo(oR,y); }
+  g.stroke();
 
   // 3 concentric rails (outer / mid / inner) — bold magenta
-  ctx.strokeStyle='rgba(255,62,201,0.95)'; ctx.lineWidth=1.6;
-  ctx.strokeRect(oL,oT,oR-oL,oB-oT);
-  ctx.strokeRect(iL,iT,iR-iL,iB-iT);
-  ctx.strokeStyle='rgba(255,62,201,0.5)'; ctx.lineWidth=1;
+  g.strokeStyle='rgba(255,62,201,0.95)'; g.lineWidth=1.6;
+  g.strokeRect(oL,oT,oR-oL,oB-oT);
+  g.strokeRect(iL,iT,iR-iL,iB-iT);
+  g.strokeStyle='rgba(255,62,201,0.5)'; g.lineWidth=1;
   const md=Math.round(b/2);
-  ctx.strokeRect(oL+md,oT+md,(oR-oL)-2*md,(oB-oT)-2*md);
+  g.strokeRect(oL+md,oT+md,(oR-oL)-2*md,(oB-oT)-2*md);
 
   // ── cockpit hull modules (viewed from outside): panels, vents, lights, consoles ──
   const M='rgba(255,62,201,', C='rgba(63,207,255,';
   // panel: outlined box with internal hatch (vert or horiz)
   const panel=(x,y,w,hh,vert=true)=>{
-    ctx.strokeStyle=M+'0.9)'; ctx.lineWidth=1.5; ctx.strokeRect(x,y,w,hh);
-    ctx.strokeStyle=C+'0.4)'; ctx.lineWidth=1; ctx.beginPath();
-    if(vert){ for(let xx=x+5; xx<x+w-1; xx+=6){ ctx.moveTo(xx,y+2); ctx.lineTo(xx,y+hh-2); } }
-    else    { for(let yy=y+5; yy<y+hh-1; yy+=6){ ctx.moveTo(x+2,yy); ctx.lineTo(x+w-2,yy); } }
-    ctx.stroke();
+    g.strokeStyle=M+'0.9)'; g.lineWidth=1.5; g.strokeRect(x,y,w,hh);
+    g.strokeStyle=C+'0.4)'; g.lineWidth=1; g.beginPath();
+    if(vert){ for(let xx=x+5; xx<x+w-1; xx+=6){ g.moveTo(xx,y+2); g.lineTo(xx,y+hh-2); } }
+    else    { for(let yy=y+5; yy<y+hh-1; yy+=6){ g.moveTo(x+2,yy); g.lineTo(x+w-2,yy); } }
+    g.stroke();
   };
   // vent: tight parallel slats
   const vent=(x,y,w,hh,vert=true)=>{
-    ctx.strokeStyle=M+'0.6)'; ctx.lineWidth=1.5; ctx.beginPath();
-    if(vert){ for(let yy=y+2; yy<y+hh; yy+=4){ ctx.moveTo(x,yy); ctx.lineTo(x+w,yy); } }
-    else    { for(let xx=x+2; xx<x+w; xx+=4){ ctx.moveTo(xx,y); ctx.lineTo(xx,y+hh); } }
-    ctx.stroke();
+    g.strokeStyle=M+'0.6)'; g.lineWidth=1.5; g.beginPath();
+    if(vert){ for(let yy=y+2; yy<y+hh; yy+=4){ g.moveTo(x,yy); g.lineTo(x+w,yy); } }
+    else    { for(let xx=x+2; xx<x+w; xx+=4){ g.moveTo(xx,y); g.lineTo(xx,y+hh); } }
+    g.stroke();
   };
   const buttons=(x,y,w,hh)=>{
-    const sq=Math.min(hh-4,8), gap=sq+5; ctx.strokeStyle='rgba(188,255,91,0.75)'; ctx.lineWidth=1;
-    ctx.beginPath(); for(let bx=x+4; bx+sq<=x+w-2; bx+=gap){ ctx.rect(bx, y+(hh-sq)/2, sq, sq); } ctx.stroke();
+    const sq=Math.min(hh-4,8), gap=sq+5; g.strokeStyle='rgba(188,255,91,0.75)'; g.lineWidth=1;
+    g.beginPath(); for(let bx=x+4; bx+sq<=x+w-2; bx+=gap){ g.rect(bx, y+(hh-sq)/2, sq, sq); } g.stroke();
   };
   // row of indicator lights (filled dots)
-  const lights=(x,y,n,gap,col,horiz=true)=>{ ctx.fillStyle=col;
-    for(let i=0;i<n;i++){ ctx.beginPath(); ctx.arc(horiz?x+i*gap:x, horiz?y:y+i*gap, 2.2, 0, 7); ctx.fill(); } };
+  const lights=(x,y,n,gap,col,horiz=true)=>{ g.fillStyle=col;
+    for(let i=0;i<n;i++){ g.beginPath(); g.arc(horiz?x+i*gap:x, horiz?y:y+i*gap, 2.2, 0, 7); g.fill(); } };
   // angled corner console (triangle wedge with a hatch line)
-  const wedge=(ax,ay,bx,by,px,py)=>{ ctx.strokeStyle=M+'0.9)'; ctx.lineWidth=1.5;
-    ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(px,py); ctx.lineTo(bx,by); ctx.stroke();
-    ctx.strokeStyle=C+'0.4)'; ctx.lineWidth=1; ctx.beginPath();
-    ctx.moveTo((ax+px)/2,(ay+py)/2); ctx.lineTo((bx+px)/2,(by+py)/2); ctx.stroke(); };
+  const wedge=(ax,ay,bx,by,px,py)=>{ g.strokeStyle=M+'0.9)'; g.lineWidth=1.5;
+    g.beginPath(); g.moveTo(ax,ay); g.lineTo(px,py); g.lineTo(bx,by); g.stroke();
+    g.strokeStyle=C+'0.4)'; g.lineWidth=1; g.beginPath();
+    g.moveTo((ax+px)/2,(ay+py)/2); g.lineTo((bx+px)/2,(by+py)/2); g.stroke(); };
 
   // corner consoles (cut + brace the four corners)
   const cc=52;
@@ -176,7 +181,7 @@ function drawFrame(){
   panel(W*0.12, iB-26, 150, 26); vent(W*0.12+6, iB-22, 138, 18, false);
   panel(W*0.70, iB-30, 190, 30); buttons(W*0.70+8, iB-26, 174, 22);
 
-  ctx.shadowBlur=0; ctx.restore();
+  g.shadowBlur=0; g.restore();
 }
 
 const heldEth = {};      // key -> {x,y,scale,spin}
@@ -186,17 +191,30 @@ const EMIT_INTERVAL = 150;
 let compActive=false, lastComp=null, frameHoldUntil=0, dbg=0;
 window.addEventListener('keydown', e=>{ if(e.key==='c')dbg=dbg===1?0:1; if(e.key==='x')dbg=dbg===2?0:2; });
 
-let last=0;
+// cap redraw to ~30fps to match OBS output (was running at full display refresh)
+const FPS=30, FRAME_MS=1000/FPS;
+let last=0, idlePainted=false, lastDraw=0;
 function loop(now){
+  requestAnimationFrame(loop);
+  if(now-lastDraw < FRAME_MS-1) return;   // throttle to FPS
+
   if(!last) last=now;
   const dt=Math.min(0.05,(now-last)/1000); last=now;
 
-  ctx.setTransform(DPR,0,0,DPR,0,0);
-  if(FG_BG){ ctx.fillStyle=FG_BG; ctx.fillRect(0,0,W,H); } else ctx.clearRect(0,0,W,H);
-  if(FRAME) drawFrame();
-
   // stale guard: if the detector stopped sending, treat as no hands
   const hs = (performance.now()-lastHandsAt < 700) ? latestHands : [];
+
+  // idle skip: nothing held, no hands, no computer -> canvas already shows
+  // the black + static frame, so don't burn cycles repainting the same pixels
+  const idle = hs.length===0 && !compActive && now>=frameHoldUntil && !dbg
+    && Object.keys(heldEth).length===0 && Object.keys(heldClaw).length===0;
+  if(idle && idlePainted){ return; }
+  lastDraw=now;
+
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  if(FG_BG){ ctx.fillStyle=FG_BG; ctx.fillRect(0,0,W,H); } else ctx.clearRect(0,0,W,H);
+  if(FRAME){ ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.drawImage(fcanvas,0,0); ctx.restore(); }
+  idlePainted = idle;
 
   const hands=[];
   hs.forEach((h,idx)=>{
@@ -260,8 +278,6 @@ function loop(now){
 
   if(dbg===1) drawComputer(ctx, W*0.5, H*0.5, H*0.55, 1);
   if(dbg===2) drawClaw(ctx, W*0.5, H*0.5, H*0.16, 0, 0.32, 1);
-
-  requestAnimationFrame(loop);
 }
 resize();
 requestAnimationFrame(loop);

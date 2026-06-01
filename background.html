@@ -36,6 +36,8 @@ const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const gcanvas = document.createElement('canvas');
 const gtx = gcanvas.getContext('2d');
+const bcanvas = document.createElement('canvas');   // half-res glow buffer
+const btx = bcanvas.getContext('2d');
 
 let W=0, H=0, DPR=1;
 function resize(){
@@ -46,6 +48,8 @@ function resize(){
   ctx.setTransform(DPR,0,0,DPR,0,0);
   gcanvas.width = canvas.width; gcanvas.height = canvas.height;
   gtx.setTransform(DPR,0,0,DPR,0,0);
+  bcanvas.width = Math.max(1, Math.floor(canvas.width/2));
+  bcanvas.height = Math.max(1, Math.floor(canvas.height/2));
 }
 window.addEventListener('resize', resize);
 
@@ -93,9 +97,14 @@ function drawTunnel(dt){
     const accent=(ring.k%6===0);
     gtx.strokeStyle=accent?`rgba(63,207,255,${0.95*alpha})`:`rgba(255,${Math.round(62+60*f)},201,${0.98*alpha})`;
     gtx.lineWidth=1.7*(0.6+f); strokeRing(gtx,ring.corners); }
+  // glow: blur a HALF-RES copy (¼ the pixels) then upscale — same halo, far cheaper.
+  // the crisp tunnel is the second, full-res, unblurred drawImage below.
+  const bw=bcanvas.width, bh=bcanvas.height;
+  btx.setTransform(1,0,0,1,0,0); btx.clearRect(0,0,bw,bh);
+  btx.filter=`blur(${Math.max(1,Math.round(2.25*DPR))}px)`; btx.drawImage(gcanvas,0,0,bw,bh); btx.filter='none';
   ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.globalCompositeOperation='lighter';
-  ctx.filter=`blur(${Math.max(2,Math.round(4.5*DPR))}px)`; ctx.globalAlpha=0.9; ctx.drawImage(gcanvas,0,0);
-  ctx.filter='none'; ctx.globalAlpha=1; ctx.drawImage(gcanvas,0,0); ctx.restore();
+  ctx.globalAlpha=0.9; ctx.drawImage(bcanvas,0,0,bw,bh,0,0,canvas.width,canvas.height);
+  ctx.globalAlpha=1; ctx.drawImage(gcanvas,0,0); ctx.restore();
 }
 
 /* ---- objects handed off from the foreground, receding down the tube ---- */
@@ -130,12 +139,17 @@ function drawItems(now){
   }
 }
 
+// cap to ~30fps to match OBS output (was running at full display refresh)
+const FPS=30, FRAME_MS=1000/FPS;
+let lastDraw=0;
 function loop(now){
+  requestAnimationFrame(loop);
+  if (now-lastDraw < FRAME_MS-1) return;   // throttle to FPS
+  lastDraw=now;
   if (!last) last=now;
   const dt=Math.min(0.05,(now-last)/1000); last=now;
   drawTunnel(dt);
   drawItems(now);
-  requestAnimationFrame(loop);
 }
 resize();
 requestAnimationFrame(loop);

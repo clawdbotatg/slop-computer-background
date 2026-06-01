@@ -33,13 +33,19 @@ function pose(lm){
 }
 
 let hands=[], last=0;
+// event-driven repaint: only draw when new skeleton data or a new capture frame
+// arrives (coalesced to one paint per animation frame) instead of a 60fps spin.
+let drawQueued=false;
+function schedule(){ if(drawQueued) return; drawQueued=true;
+  requestAnimationFrame(()=>{ drawQueued=false; draw(); }); }
+
 const es=new EventSource('/hands.sse');
-es.onmessage=e=>{ try{ hands=(JSON.parse(e.data).hands)||[]; last=performance.now(); }catch(_){ } };
+es.onmessage=e=>{ try{ hands=(JSON.parse(e.data).hands)||[]; last=performance.now(); schedule(); }catch(_){ } };
 es.onerror=()=>{ hud.textContent='SSE error — is slop-server.py running on :9911?'; };
 
 // live capture frame from the detector (what Vision actually sees)
 const cap=new Image(); let capReady=false;
-cap.onload=()=>{ capReady=true; }; cap.onerror=()=>{ capReady=false; };
+cap.onload=()=>{ capReady=true; schedule(); }; cap.onerror=()=>{ capReady=false; };
 setInterval(()=>{ cap.src='/slop-capture.jpg?t='+Date.now(); }, 150);
 
 function draw(){
@@ -59,7 +65,6 @@ function draw(){
     info+='  '+(h.chirality||'?')+': '+g+'\n';
   });
   hud.textContent=info;
-  requestAnimationFrame(draw);
 }
 draw();
 </script></body></html>
