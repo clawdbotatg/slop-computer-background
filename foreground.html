@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>slop computer // foreground</title>
+<style>
+  html, body { margin:0; padding:0; background:#000; overflow:hidden; height:100%; }
+  #stage { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:#000; }
+  #wrap { position:relative; aspect-ratio:16/9; width:100vw; max-height:100vh; }
+  @media (min-aspect-ratio:16/9){ #wrap{ width:auto; height:100vh; } }
+  canvas { display:block; width:100%; height:100%; }
+</style>
+</head>
+<body>
+  <div id="stage"><div id="wrap"><canvas id="c"></canvas></div></div>
+<script type="module">
+import { drawEth, drawClaw, drawComputer, loadComputer } from './slop-shapes.js';
+loadComputer('computer.png');
+{ const _t = new URLSearchParams(location.search).get('t'); if (_t) document.title = _t; }
+
+// Black background for the OBS LUMA KEY. Set null for transparent.
+const FG_BG = '#000000';
+const MIRROR = false;        // flip if the rendered objects land on the wrong side vs your composite
+const VP_Y = 0.35;           // must match background's vanishing point
+const CLAW_INWARD = 40 * Math.PI / 180;  // rotate each claw this much toward screen-center
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W=0, H=0, DPR=1;
+function resize(){
+  const r = canvas.getBoundingClientRect();
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = Math.max(2, Math.floor(r.width)); H = Math.max(2, Math.floor(r.height));
+  canvas.width = Math.floor(W*DPR); canvas.height = Math.floor(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize', resize);
+
+// hand off a released object to the background screen (normalized coords)
+function send(kind, x, y, scale, extra={}){
+  const body = JSON.stringify({ kind, x:x/W, y:y/H, s:scale/H, ...extra });
+  fetch('/spawn', { method:'POST', body, keepalive:true }).catch(()=>{});
+}
+
+// ---- hand input: from the native detector via SSE (no webcam here) ----
+let latestHands = [], lastHandsAt = 0;
+const es = new EventSource('/hands.sse');
+es.onmessage = e => {
+  try {
+    const d = JSON.parse(e.data);
+    latestHands = (d.hands || []).map(h => ({
+      chirality: h.chirality,
+      lm: (h.lm || []).map(p => ({ x: MIRROR ? 1 - p[0] : p[0], y: p[1] }))
+    }));
+    lastHandsAt = performance.now();
+  } catch(_) {}
+};
+
+function dist2(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+function palmCenter(lm){ const idx=[0,5,9,13,17]; let x=0,y=0;
+  for(const i of idx){ x+=lm[i].x; y+=lm[i].y; } return {x:x/idx.length, y:y/idx.length}; }
+function handPose(lm){
+  const w=lm[0], ext=[];
+  ext[0] = dist2(lm[4],w) > dist2(lm[2],w)*1.0;
+  const pr=[[8,6],[12,10],[16,14],[20,18]];
+  for(let i=0;i<4;i++) ext[i+1] = dist2(lm[pr[i][0]],w) > dist2(lm[pr[i][1]],w)*0.9;
+  const count=ext.filter(Boolean).length;
+  return { count, fistish:count<=1, open:count>=4 };
+}
+
+const heldEth = {};      // key -> {x,y,scale,spin}
+const heldClaw = {};     // key -> {x,y,scale,angle,open}
+const lastEmit = {};
+const EMIT_INTERVAL = 150;
+let compActive=false, lastComp=null, frameHoldUntil=0, dbg=0;
+window.addEventListener('keydown', e=>{ if(e.key==='c')dbg=dbg===1?0:1; if(e.key==='x')dbg=dbg===2?0:2; });
+
+let last=0;
+function loop(now){
+  if(!last) last=now;
+  const dt=Math.min(0.05,(now-last)/1000); last=now;
+
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  if(FG_BG){ ctx.fillStyle=FG_BG; ctx.fillRect(0,0,W,H); } else ctx.clearRect(0,0,W,H);
+
+  // stale guard: if the detector stopped sending, treat as no hands
+  const hs = (performance.now()-lastHandsAt < 700) ? latestHands : [];
+
+  const hands=[];
+  hs.forEach((h,idx)=>{
+    const lm=h.lm; if(!lm || lm.length<21) return;
+    const c=palmCenter(lm);
+    const sx=c.x*W, sy=c.y*H;
+    const dx=(lm[9].x-lm[0].x)*W, dy=(lm[9].y-lm[0].y)*H;
+    const span=Math.hypot(dx,dy);
+    hands.push({ key:(h.chirality||'h')+idx, lm, sx, sy, dx, dy, span, scale:Math.max(30,span*1.7), pose:handPose(lm) });
+  });
+
+  // two-hand frame -> hold the computer
+  let frame=null;
+  if(hands.length>=2){
+    const a=hands[0], b=hands[1];
+    const d=Math.hypot(a.sx-b.sx, a.sy-b.sy), avg=(a.span+b.span)/2;
+    if(d < avg*4.5 && !a.pose.fistish && !b.pose.fistish){
+      let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
+      for(const hi of [a,b]) for(const p of hi.lm){ const x=p.x*W,y=p.y*H;
+        if(x<minx)minx=x; if(x>maxx)maxx=x; if(y<miny)miny=y; if(y>maxy)maxy=y; }
+      frame={ cx:(minx+maxx)/2, cy:(miny+maxy)/2, size:Math.min(Math.max(maxx-minx,maxy-miny)*1.15, H*0.92) };
+    }
+  }
+  if(frame){ frameHoldUntil=now+200; lastComp=frame; }
+
+  const ethSeen={}, clawSeen={};
+  if(now < frameHoldUntil && lastComp){
+    compActive=true;
+    drawComputer(ctx, lastComp.cx, lastComp.cy, lastComp.size, 1);
+  } else {
+    if(compActive){ send('computer', lastComp.cx, lastComp.cy, lastComp.size); compActive=false; }
+    for(const hi of hands){
+      const angle=Math.atan2(hi.dy,hi.dx);
+      if(hi.pose.open){                                   // ✋ eth tracks the hand
+        const prev=heldEth[hi.key];
+        heldEth[hi.key]={ x:hi.sx, y:hi.sy, scale:hi.scale, spin:(prev?prev.spin:0)+dt*1.2 };
+        ethSeen[hi.key]=1;
+        drawEth(ctx, hi.sx, hi.sy, hi.scale, heldEth[hi.key].spin, 1);
+      } else if(hi.pose.fistish){                          // ✊ drop + emit stream
+        if(now-(lastEmit[hi.key]||0) >= EMIT_INTERVAL){
+          lastEmit[hi.key]=now;
+          const jx=(Math.random()-0.5)*18, jy=(Math.random()-0.5)*18;
+          send('eth', hi.sx+jx, hi.sy+jy, hi.scale, { spin:Math.random()*6.28 });
+        }
+      } else {                                             // 🦞 claw, opens with pinch
+        const pinchPx=Math.hypot((hi.lm[4].x-hi.lm[8].x)*W,(hi.lm[4].y-hi.lm[8].y)*H);
+        const openAmt=Math.max(0,Math.min(1,(pinchPx/Math.max(1,hi.span)-0.35)/1.0))*0.5;
+        const clawAngle = angle + (hi.sx < W/2 ? 1 : -1) * CLAW_INWARD;  // tilt inward
+        heldClaw[hi.key]={ x:hi.sx, y:hi.sy, scale:hi.span*2.4, angle:clawAngle, open:openAmt };
+        clawSeen[hi.key]=1;
+        drawClaw(ctx, hi.sx, hi.sy, hi.span*2.4, clawAngle, openAmt, 1);
+      }
+    }
+  }
+
+  // release (hand off to background) anything whose hand-state ended this frame
+  for(const key in heldEth){ if(!ethSeen[key]){ const h=heldEth[key];
+    send('eth', h.x, h.y, h.scale, { spin:h.spin }); delete heldEth[key]; } }
+  for(const key in heldClaw){ if(!clawSeen[key]){ const h=heldClaw[key];
+    send('claw', h.x, h.y, h.scale, { angle:h.angle, open:h.open }); delete heldClaw[key]; } }
+
+  if(dbg===1) drawComputer(ctx, W*0.5, H*0.5, H*0.55, 1);
+  if(dbg===2) drawClaw(ctx, W*0.5, H*0.5, H*0.16, 0, 0.32, 1);
+
+  requestAnimationFrame(loop);
+}
+resize();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

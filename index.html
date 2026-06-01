@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>slop computer // tunnel</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #000;
+    overflow: hidden;
+    height: 100%;
+  }
+  /* 16:9 stage, letterboxed to fit any window */
+  #stage {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+  }
+  #wrap {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    width: 100vw;
+    max-height: 100vh;
+  }
+  /* if height-constrained, cap by height instead */
+  @media (min-aspect-ratio: 16/9) {
+    #wrap { width: auto; height: 100vh; }
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  /* CRT scanline overlay, matches slop-computer vibe */
+  #scan {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg,
+      rgba(0,0,0,0.22) 0px,
+      rgba(0,0,0,0.22) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    mix-blend-mode: multiply;
+  }
+  /* light edge darkening (boxy, not a round vignette) */
+  #vig {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(90deg, rgba(0,0,0,0.5) 0%, transparent 12%, transparent 88%, rgba(0,0,0,0.5) 100%),
+      linear-gradient(0deg, rgba(0,0,0,0.5) 0%, transparent 14%, transparent 86%, rgba(0,0,0,0.5) 100%);
+  }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <div id="wrap">
+      <canvas id="c"></canvas>
+      <div id="scan"></div>
+      <div id="vig"></div>
+    </div>
+  </div>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  // offscreen layer that all the neon is drawn to crisp; we blur it ONCE per
+  // frame for the glow instead of paying for per-stroke shadowBlur ~120×/frame.
+  const gcanvas = document.createElement('canvas');
+  const gtx = gcanvas.getContext('2d');
+
+  // --- palette (from slop-computer-live) ---
+  const MAGENTA = '#ff3ec9';
+  const PURPLE  = '#7c4dff';
+  const CYAN    = '#3fcfff';
+  const BG_NEAR = '#14091e';
+  const BG_FAR  = '#06030d';
+
+  let W = 0, H = 0, DPR = 1;
+  function resize() {
+    const r = canvas.getBoundingClientRect();
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = Math.max(2, Math.floor(r.width));
+    H = Math.max(2, Math.floor(r.height));
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    gcanvas.width = canvas.width;
+    gcanvas.height = canvas.height;
+    gtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+
+  // --- tunnel geometry ---
+  // Rings sit at FIXED world positions along z. The camera travels forward
+  // through them along a wandering path, so the tube appears to bank left/right
+  // and rise/fall — the vanishing point drifts and we take turns.
+  const HALF_W = 1.0;        // half-width of tube (x)
+  const HALF_H = 0.62;       // half-height of tube (y)
+  const FOCAL  = 1.0;        // focal length
+  const RING_SPACING = 0.62; // distance between cross rings in z
+  const NUM_RINGS = 46;      // how many rings drawn into the distance
+  const NEAR = 0.42;         // nearest z we draw — near rings blow past frame edges
+  const FAR  = NUM_RINGS * RING_SPACING;
+  const LONGITUDINAL = 8;    // grid divisions per wall (longitudinal lines)
+  const SPEED = 2.0;         // travel speed (units/sec)
+  const BEND = 0.62;         // how hard the tube curves (world units of sway)
+  const VP_Y = 0.35;         // vanishing point vertical position (0.5 = center, lower = higher up)
+
+  // The flight path: lateral (x) and vertical (y) offset of the tube centerline
+  // as a function of absolute distance d. Layered sines = smooth, non-repeating-
+  // looking wander with gentle turns and hills.
+  function pathX(d) {
+    return BEND * (1.15*Math.sin(d*0.105 + 1.3) + 0.55*Math.sin(d*0.043 + 0.2));
+  }
+  function pathY(d) {
+    return BEND * (0.70*Math.sin(d*0.082 + 0.6) + 0.35*Math.cos(d*0.037 + 2.1));
+  }
+
+  // cross-section perimeter points (in tube-local x,y), with corner flag
+  const PERIM = [];
+  for (let i = 0; i <= LONGITUDINAL; i++) {
+    const tx = -HALF_W + (2*HALF_W) * (i/LONGITUDINAL);
+    const edge = (i === 0 || i === LONGITUDINAL);
+    PERIM.push({x: tx, y: -HALF_H, corner: edge}); // ceiling
+    PERIM.push({x: tx, y:  HALF_H, corner: edge}); // floor
+  }
+  for (let i = 1; i < LONGITUDINAL; i++) {
+    const ty = -HALF_H + (2*HALF_H) * (i/LONGITUDINAL);
+    PERIM.push({x: -HALF_W, y: ty, corner: false}); // left
+    PERIM.push({x:  HALF_W, y: ty, corner: false}); // right
+  }
+  // indices into PERIM that are the 4 true tube corners, in winding order
+  const CORNER_LOCAL = [
+    {x:-HALF_W,y:-HALF_H},{x:HALF_W,y:-HALF_H},
+    {x:HALF_W,y:HALF_H},{x:-HALF_W,y:HALF_H}
+  ];
+
+  // project a tube-local point on the ring at absolute distance d, given the
+  // camera's current absolute distance (travel) and its path offset.
+  function proj(px, py, d, z, camX, camY) {
+    const s = (FOCAL / z) * (H * 0.9);
+    const rx = px + pathX(d) - camX;   // relative to camera centerline
+    const ry = py + pathY(d) - camY;
+    return { x: W*0.5 + rx*s, y: H*VP_Y + ry*s };
+  }
+
+  function fog(z) {
+    const t = (FAR - z) / FAR;          // 0 far -> 1 near
+    return Math.pow(Math.max(0, Math.min(1, t)), 1.6);
+  }
+
+  let travel = 0;     // absolute distance traveled into the tunnel
+  let last = 0;
+  let phase = 0;
+
+  // Ethereum logos spawned on click, floating back to the vanishing point
+  const logos = [];
+  const ETH_Z0 = 1.0;      // spawn depth
+  const ETH_RECEDE = 1.5;  // how fast it falls back (depth units/sec)
+  canvas.addEventListener('pointerdown', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (W / rect.width);
+    const y = (e.clientY - rect.top)  * (H / rect.height);
+    logos.push({ x, y, t0: e.timeStamp });
+  });
+
+  function draw(now) {
+    if (!last) last = now;
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    travel -= SPEED * dt;   // recede: rings shrink toward the vanishing point
+    phase += dt;
+
+    // background on the main canvas
+    ctx.fillStyle = BG_FAR;
+    ctx.fillRect(0, 0, W, H);
+
+    const pulse = 0.85 + 0.15 * Math.sin(phase * 2.0);
+    const camX = pathX(travel);
+    const camY = pathY(travel);
+
+    // Build visible rings (ascending depth). Rings live at world z = k*SPACING.
+    const kStart = Math.ceil((travel + NEAR) / RING_SPACING);
+    const rings = []; // { z, fog, k, corners:[4], perim:[...] }
+    for (let n = 0; n < NUM_RINGS; n++) {
+      const k = kStart + n;
+      const d = k * RING_SPACING;       // absolute distance of this ring
+      const z = d - travel;             // depth in front of camera
+      if (z < NEAR || z > FAR) continue;
+      const f = fog(z);
+      if (f <= 0.001) continue;
+      const corners = CORNER_LOCAL.map(c => proj(c.x, c.y, d, z, camX, camY));
+      const perim = PERIM.map(p => proj(p.x, p.y, d, z, camX, camY));
+      rings.push({ z, f, k, corners, perim });
+    }
+
+    // ---- draw all neon CRISP to the offscreen glow layer (no shadowBlur) ----
+    gtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    gtx.clearRect(0, 0, W, H);
+    gtx.lineCap = 'round';
+    gtx.lineJoin = 'round';
+
+    // longitudinal grid lines (polylines bending with the curving tube)
+    for (let j = 0; j < PERIM.length; j++) {
+      if (rings.length < 2) break;
+      const isCorner = PERIM[j].corner;
+      const a = rings[0].perim[j];
+      const b = rings[rings.length - 1].perim[j];
+      const grad = gtx.createLinearGradient(a.x, a.y, b.x, b.y);
+      grad.addColorStop(0,    `rgba(255,${isCorner?120:90},220,${(isCorner?1.0:0.8)*pulse})`);
+      grad.addColorStop(0.55, `rgba(220,90,240,${(isCorner?0.8:0.55)*pulse})`);
+      grad.addColorStop(1,    `rgba(150,90,255,${0.14*pulse})`);
+      gtx.strokeStyle = grad;
+      gtx.lineWidth = isCorner ? 2.2 : 1.4;
+      gtx.beginPath();
+      gtx.moveTo(rings[0].perim[j].x, rings[0].perim[j].y);
+      for (let r = 1; r < rings.length; r++) {
+        gtx.lineTo(rings[r].perim[j].x, rings[r].perim[j].y);
+      }
+      gtx.stroke();
+    }
+
+    // cross rings (single crisp stroke each; the blur composite is the glow)
+    for (let r = rings.length - 1; r >= 0; r--) {
+      const ring = rings[r];
+      const f = ring.f;
+      const alpha = f * pulse;
+      const accent = (ring.k % 6 === 0);
+      gtx.strokeStyle = accent
+        ? `rgba(63,207,255,${0.95*alpha})`
+        : `rgba(255,${Math.round(62 + 60*f)},201,${0.98*alpha})`;
+      gtx.lineWidth = 1.7 * (0.6 + f);
+      strokeRing(gtx, ring.corners);
+    }
+
+    // ---- composite the glow layer onto main: blurred halo + crisp core ----
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);   // device pixels
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.filter = `blur(${Math.max(2, Math.round(4.5 * DPR))}px)`;
+    ctx.globalAlpha = 0.9;
+    ctx.drawImage(gcanvas, 0, 0);
+    ctx.filter = 'none';
+    ctx.globalAlpha = 1;
+    ctx.drawImage(gcanvas, 0, 0);
+    ctx.restore();
+
+    // Ethereum logos: spawned on click, receding to the vanishing point
+    const VPx = W * 0.5, VPy = H * VP_Y;
+    for (let i = logos.length - 1; i >= 0; i--) {
+      const L = logos[i];
+      const age = (now - L.t0) / 1000;
+      const z = ETH_Z0 + ETH_RECEDE * age;   // depth grows -> recedes
+      const k = 1 - ETH_Z0 / z;               // 0 at spawn -> ~1 at vanishing point
+      if (k > 0.5) { logos.splice(i, 1); continue; }
+      const px = L.x + (VPx - L.x) * k;       // drift toward vanishing point
+      const py = L.y + (VPy - L.y) * k;
+      const scale = H * ETH.scaleFrac * (ETH_Z0 / z);
+      let alpha = 1;
+      if (k < 0.06) alpha = k / 0.06;                  // quick pop-in
+      else if (k > 0.22) alpha = Math.max(0, 1 - (k - 0.22) / 0.28); // fade out fast
+      drawEth(px, py, scale, age * 0.9, alpha);
+    }
+
+    requestAnimationFrame(draw);
+  }
+
+  function strokeRing(g, c) {
+    g.beginPath();
+    g.moveTo(c[0].x, c[0].y);
+    g.lineTo(c[1].x, c[1].y);
+    g.lineTo(c[2].x, c[2].y);
+    g.lineTo(c[3].x, c[3].y);
+    g.closePath();
+    g.stroke();
+  }
+
+  // --- Ethereum logo: a square bipyramid (octahedron), spinning ---
+  // square rotated 45° at the waist, apex above + below, gap in the middle.
+  const ETH = {
+    r: 0.95,        // waist square radius (XZ)
+    hTop: 1.75,     // top apex height above waist
+    hBot: 1.45,     // bottom apex depth below waist
+    gap: 0.18,      // vertical gap between upper + lower halves
+    tilt: -0.30,    // forward tilt (radians) so we see the waist diamond
+    scaleFrac: 0.115,
+  };
+  function buildEthVerts() {
+    const { r, hTop, hBot, gap } = ETH;
+    const g = gap / 2;
+    return [
+      [0,  hTop + g, 0],            // 0 top apex
+      [ r,  g, 0],[0, g,  r],[-r, g, 0],[0, g, -r],   // 1-4 upper waist square
+      [0, -hBot - g, 0],            // 5 bottom apex
+      [ r, -g, 0],[0,-g,  r],[-r,-g, 0],[0,-g, -r],   // 6-9 lower waist square
+    ];
+  }
+  const ETH_VERTS = buildEthVerts();
+  const ETH_EDGES = [
+    [0,1],[0,2],[0,3],[0,4], [1,2],[2,3],[3,4],[4,1],   // upper pyramid
+    [5,6],[5,7],[5,8],[5,9], [6,7],[7,8],[8,9],[9,6],   // lower pyramid
+  ];
+  const ETH_FACES = [
+    [0,1,2],[0,2,3],[0,3,4],[0,4,1],   // upper
+    [5,6,7],[5,7,8],[5,8,9],[5,9,6],   // lower
+  ];
+
+  function drawEth(cx, cy, scale, spin, alpha) {
+    const cs = Math.cos(spin), sn = Math.sin(spin);
+    const ct = Math.cos(ETH.tilt), st = Math.sin(ETH.tilt);
+    const P = ETH_VERTS.map(([x,y,z]) => {
+      // spin about Y
+      const x1 =  x*cs + z*sn;
+      const z1 = -x*sn + z*cs;
+      // tilt about X
+      const y2 = y*ct - z1*st;
+      const z2 = y*st + z1*ct;
+      return { x: cx + x1*scale, y: cy - y2*scale, z: z2 };
+    });
+
+    // translucent gem faces, back -> front
+    const order = ETH_FACES
+      .map(f => ({ f, z: (P[f[0]].z + P[f[1]].z + P[f[2]].z) / 3 }))
+      .sort((a,b) => a.z - b.z);
+    for (const { f, z } of order) {
+      ctx.beginPath();
+      ctx.moveTo(P[f[0]].x, P[f[0]].y);
+      ctx.lineTo(P[f[1]].x, P[f[1]].y);
+      ctx.lineTo(P[f[2]].x, P[f[2]].y);
+      ctx.closePath();
+      ctx.fillStyle = `rgba(188,255,91,${(z > 0 ? 0.20 : 0.07) * alpha})`;
+      ctx.fill();
+    }
+
+    // glowing green edges
+    ctx.shadowColor = '#bcff5b';
+    ctx.shadowBlur = 16;
+    ctx.strokeStyle = `rgba(210,255,140,${0.95 * alpha})`;
+    ctx.lineWidth = 2.2;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (const [a,b] of ETH_EDGES) {
+      ctx.moveTo(P[a].x, P[a].y);
+      ctx.lineTo(P[b].x, P[b].y);
+    }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
+  resize();
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

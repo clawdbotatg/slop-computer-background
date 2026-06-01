@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8" />
+<title>slop camera preview</title>
+<style>
+  html,body{margin:0;background:#06030d;color:#e8e0ff;height:100%;
+    font:15px/1.5 "VT323","Courier New",monospace}
+  #bar{position:fixed;top:0;left:0;right:0;display:flex;gap:10px;align-items:center;
+    padding:10px 14px;background:rgba(10,15,36,.92);border-bottom:1px solid #ff3ec9;z-index:2}
+  select,button{font:15px "VT323",monospace;background:#1a1638;color:#e8e0ff;
+    border:1px solid #7c4dff;border-radius:5px;padding:5px 8px}
+  #info{color:#bcff5b}
+  #wrap{position:absolute;inset:54px 0 0 0;display:flex;align-items:center;justify-content:center}
+  video{max-width:100%;max-height:100%;background:#000;transform:scaleX(1)}
+  #err{color:#ff5577;padding:14px}
+</style></head>
+<body>
+<div id="bar">
+  <span>camera:</span>
+  <select id="sel"></select>
+  <button id="refresh">refresh</button>
+  <label><input type="checkbox" id="mirror"> mirror</label>
+  <span id="info"></span>
+</div>
+<div id="wrap"><video id="v" autoplay playsinline muted></video></div>
+<div id="err"></div>
+<script>
+const sel=document.getElementById('sel'), v=document.getElementById('v'),
+      info=document.getElementById('info'), errEl=document.getElementById('err'),
+      mirror=document.getElementById('mirror');
+let stream=null;
+
+mirror.onchange=()=>{ v.style.transform = mirror.checked ? 'scaleX(-1)' : 'scaleX(1)'; };
+
+async function listDevices(){
+  // one getUserMedia call unlocks device *labels*
+  try{ const s=await navigator.mediaDevices.getUserMedia({video:true}); s.getTracks().forEach(t=>t.stop()); }
+  catch(e){ errEl.textContent='camera permission needed: '+e.message; }
+  const devs=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');
+  sel.innerHTML='';
+  devs.forEach((d,i)=>{
+    const o=document.createElement('option');
+    o.value=d.deviceId; o.textContent=d.label || ('camera '+(i+1));
+    sel.appendChild(o);
+  });
+  if(devs.length){ start(devs[0].deviceId); }
+  else { errEl.textContent='no video input devices found'; }
+}
+
+async function start(id){
+  errEl.textContent='';
+  if(stream){ stream.getTracks().forEach(t=>t.stop()); }
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{ deviceId: id?{exact:id}:undefined, width:{ideal:1280}, height:{ideal:720} }});
+    v.srcObject=stream;
+    const t=stream.getVideoTracks()[0];
+    const s=t.getSettings();
+    info.textContent=`${t.label}  ${s.width||'?'}x${s.height||'?'} @${Math.round(s.frameRate||0)}fps`;
+  }catch(e){ errEl.textContent='could not open camera: '+e.message; }
+}
+
+sel.onchange=()=>start(sel.value);
+document.getElementById('refresh').onclick=listDevices;
+listDevices();
+</script></body></html>

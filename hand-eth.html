@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>slop computer // hand eth</title>
+<style>
+  html, body { margin:0; padding:0; background:#000; overflow:hidden; height:100%; }
+  #stage { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:#000; }
+  #wrap { position:relative; aspect-ratio:16/9; width:100vw; max-height:100vh; }
+  @media (min-aspect-ratio:16/9){ #wrap{ width:auto; height:100vh; } }
+  canvas { display:block; width:100%; height:100%; }
+  video { display:none; }
+  #scan {
+    position:absolute; inset:0; pointer-events:none;
+    background:repeating-linear-gradient(0deg, rgba(0,0,0,0.18) 0px, rgba(0,0,0,0.18) 1px, transparent 1px, transparent 3px);
+    mix-blend-mode:multiply;
+  }
+  #status {
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    color:#ff3ec9; font-family:"VT323","Courier New",monospace; font-size:22px;
+    text-align:center; text-shadow:0 0 8px rgba(255,62,201,0.6); pointer-events:none;
+    letter-spacing:1px; line-height:1.6;
+  }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <div id="wrap">
+      <video id="cam" playsinline muted></video>
+      <canvas id="c"></canvas>
+      <div id="scan"></div>
+      <div id="status">starting camera…<br><span style="font-size:15px;opacity:.8">allow camera access, then make a fist ✊</span></div>
+    </div>
+  </div>
+
+<script type="module">
+import { GestureRecognizer, FilesetResolver }
+  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const video = document.getElementById('cam');
+const statusEl = document.getElementById('status');
+
+// offscreen glow layer (one blur per frame instead of per-stroke shadow)
+const gcanvas = document.createElement('canvas');
+const gtx = gcanvas.getContext('2d');
+
+let W = 0, H = 0, DPR = 1;
+function resize() {
+  const r = canvas.getBoundingClientRect();
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = Math.max(2, Math.floor(r.width));
+  H = Math.max(2, Math.floor(r.height));
+  canvas.width = Math.floor(W*DPR); canvas.height = Math.floor(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  gcanvas.width = canvas.width; gcanvas.height = canvas.height;
+  gtx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize', resize);
+
+/* ---------------- tunnel (additive over the webcam) ---------------- */
+const HALF_W=1.0, HALF_H=0.62, FOCAL=1.0, RING_SPACING=0.62, NUM_RINGS=46;
+const NEAR=0.42, FAR=NUM_RINGS*RING_SPACING, LONGITUDINAL=8, SPEED=2.0, BEND=0.62;
+const VP_Y=0.35;
+const pathX = d => BEND*(1.15*Math.sin(d*0.105+1.3)+0.55*Math.sin(d*0.043+0.2));
+const pathY = d => BEND*(0.70*Math.sin(d*0.082+0.6)+0.35*Math.cos(d*0.037+2.1));
+
+const PERIM=[];
+for (let i=0;i<=LONGITUDINAL;i++){ const tx=-HALF_W+2*HALF_W*(i/LONGITUDINAL); const edge=(i===0||i===LONGITUDINAL);
+  PERIM.push({x:tx,y:-HALF_H,corner:edge}); PERIM.push({x:tx,y:HALF_H,corner:edge}); }
+for (let i=1;i<LONGITUDINAL;i++){ const ty=-HALF_H+2*HALF_H*(i/LONGITUDINAL);
+  PERIM.push({x:-HALF_W,y:ty,corner:false}); PERIM.push({x:HALF_W,y:ty,corner:false}); }
+const CORNER_LOCAL=[{x:-HALF_W,y:-HALF_H},{x:HALF_W,y:-HALF_H},{x:HALF_W,y:HALF_H},{x:-HALF_W,y:HALF_H}];
+function proj(px,py,d,z,camX,camY){ const s=(FOCAL/z)*(H*0.9);
+  return { x:W*0.5+(px+pathX(d)-camX)*s, y:H*VP_Y+(py+pathY(d)-camY)*s }; }
+const fog = z => Math.pow(Math.max(0,Math.min(1,(FAR-z)/FAR)),1.6);
+function strokeRing(g,c){ g.beginPath(); g.moveTo(c[0].x,c[0].y); g.lineTo(c[1].x,c[1].y);
+  g.lineTo(c[2].x,c[2].y); g.lineTo(c[3].x,c[3].y); g.closePath(); g.stroke(); }
+
+let travel=0, phase=0, last=0;
+function drawTunnel(dt){
+  travel -= SPEED*dt; phase += dt;
+  const pulse=0.85+0.15*Math.sin(phase*2.0);
+  const camX=pathX(travel), camY=pathY(travel);
+  const kStart=Math.ceil((travel+NEAR)/RING_SPACING);
+  const rings=[];
+  for (let n=0;n<NUM_RINGS;n++){ const k=kStart+n; const d=k*RING_SPACING; const z=d-travel;
+    if (z<NEAR||z>FAR) continue; const f=fog(z); if (f<=0.001) continue;
+    rings.push({z,f,k, corners:CORNER_LOCAL.map(c=>proj(c.x,c.y,d,z,camX,camY)),
+                perim:PERIM.map(p=>proj(p.x,p.y,d,z,camX,camY))}); }
+
+  gtx.setTransform(DPR,0,0,DPR,0,0); gtx.clearRect(0,0,W,H);
+  gtx.lineCap='round'; gtx.lineJoin='round';
+  for (let j=0;j<PERIM.length;j++){ if (rings.length<2) break;
+    const isC=PERIM[j].corner; const a=rings[0].perim[j], b=rings[rings.length-1].perim[j];
+    const grad=gtx.createLinearGradient(a.x,a.y,b.x,b.y);
+    grad.addColorStop(0,`rgba(255,${isC?120:90},220,${(isC?1.0:0.8)*pulse})`);
+    grad.addColorStop(0.55,`rgba(220,90,240,${(isC?0.8:0.55)*pulse})`);
+    grad.addColorStop(1,`rgba(150,90,255,${0.14*pulse})`);
+    gtx.strokeStyle=grad; gtx.lineWidth=isC?2.2:1.4;
+    gtx.beginPath(); gtx.moveTo(rings[0].perim[j].x,rings[0].perim[j].y);
+    for (let r=1;r<rings.length;r++) gtx.lineTo(rings[r].perim[j].x,rings[r].perim[j].y);
+    gtx.stroke(); }
+  for (let r=rings.length-1;r>=0;r--){ const ring=rings[r]; const f=ring.f; const alpha=f*pulse;
+    const accent=(ring.k%6===0);
+    gtx.strokeStyle=accent?`rgba(63,207,255,${0.95*alpha})`:`rgba(255,${Math.round(62+60*f)},201,${0.98*alpha})`;
+    gtx.lineWidth=1.7*(0.6+f); strokeRing(gtx,ring.corners); }
+
+  // composite glow over the webcam, additively
+  ctx.save();
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.globalCompositeOperation='lighter';
+  ctx.filter=`blur(${Math.max(2,Math.round(4.5*DPR))}px)`; ctx.globalAlpha=0.8; ctx.drawImage(gcanvas,0,0);
+  ctx.filter='none'; ctx.globalAlpha=0.95; ctx.drawImage(gcanvas,0,0);
+  ctx.restore();
+}
+
+/* ---------------- Ethereum logo (3D octahedron) ---------------- */
+const ETH = { r:0.95, hTop:1.75, hBot:1.45, gap:0.18, tilt:-0.30 };
+function ethVerts(){ const {r,hTop,hBot,gap}=ETH; const g=gap/2;
+  return [[0,hTop+g,0],[r,g,0],[0,g,r],[-r,g,0],[0,g,-r],[0,-hBot-g,0],[r,-g,0],[0,-g,r],[-r,-g,0],[0,-g,-r]]; }
+const EV=ethVerts();
+const EE=[[0,1],[0,2],[0,3],[0,4],[1,2],[2,3],[3,4],[4,1],[5,6],[5,7],[5,8],[5,9],[6,7],[7,8],[8,9],[9,6]];
+const EF=[[0,1,2],[0,2,3],[0,3,4],[0,4,1],[5,6,7],[5,7,8],[5,8,9],[5,9,6]];
+function drawEth(cx,cy,scale,spin,alpha){
+  const cs=Math.cos(spin),sn=Math.sin(spin),ct=Math.cos(ETH.tilt),st=Math.sin(ETH.tilt);
+  const P=EV.map(([x,y,z])=>{ const x1=x*cs+z*sn, z1=-x*sn+z*cs; const y2=y*ct-z1*st, z2=y*st+z1*ct;
+    return {x:cx+x1*scale, y:cy-y2*scale, z:z2}; });
+  const order=EF.map(f=>({f,z:(P[f[0]].z+P[f[1]].z+P[f[2]].z)/3})).sort((a,b)=>a.z-b.z);
+  for (const {f,z} of order){ ctx.beginPath(); ctx.moveTo(P[f[0]].x,P[f[0]].y);
+    ctx.lineTo(P[f[1]].x,P[f[1]].y); ctx.lineTo(P[f[2]].x,P[f[2]].y); ctx.closePath();
+    ctx.fillStyle=`rgba(188,255,91,${(z>0?0.22:0.08)*alpha})`; ctx.fill(); }
+  ctx.shadowColor='#bcff5b'; ctx.shadowBlur=16; ctx.strokeStyle=`rgba(210,255,140,${0.95*alpha})`;
+  ctx.lineWidth=2.2; ctx.lineJoin='round'; ctx.beginPath();
+  for (const [a,b] of EE){ ctx.moveTo(P[a].x,P[a].y); ctx.lineTo(P[b].x,P[b].y); }
+  ctx.stroke(); ctx.shadowBlur=0;
+}
+
+/* ---------------- slop computer image (summoned by two-hand frame) ---------------- */
+const compImg = new Image(); let compReady=false;
+compImg.onload=()=>{compReady=true;}; compImg.src='computer.png';
+function drawComputer(cx,cy,size,alpha){
+  if(!compReady) return;
+  ctx.save(); ctx.globalAlpha=alpha;
+  ctx.shadowColor='#ff3ec9'; ctx.shadowBlur=24;
+  ctx.drawImage(compImg, cx-size/2, cy-size/2, size, size);
+  ctx.restore();
+}
+
+/* ---------------- lobster claw (3D-ish neon wireframe, red) ---------------- */
+// local space: claw points +X (along the fingers); hinge at origin
+const CLAW_BASE=[[0.1,0.42],[-0.18,0.56],[-0.58,0.40],[-0.74,0.0],[-0.58,-0.40],[-0.18,-0.56],[0.1,-0.42]];
+const CLAW_JAW =[[0.0,0.06],[0.0,0.46],[0.46,0.56],[0.96,0.30],[1.22,0.04],[0.76,0.11],[0.36,0.09]]; // upper jaw
+const CLAW_JAW_LO = CLAW_JAW.map(([x,y])=>[x,-y]);                                                    // lower jaw
+function drawClaw(cx,cy,scale,handAngle,openAngle,alpha){
+  const chA=Math.cos(handAngle), shA=Math.sin(handAngle);
+  function tf(px,py,jaw){ const cj=Math.cos(jaw),sj=Math.sin(jaw);
+    const x1=px*cj-py*sj, y1=px*sj+py*cj;
+    const x2=x1*chA-y1*shA, y2=x1*shA+y1*chA;
+    return {x:cx+x2*scale, y:cy+y2*scale}; }
+  function poly(pts,jaw){
+    ctx.beginPath(); const p0=tf(pts[0][0],pts[0][1],jaw); ctx.moveTo(p0.x,p0.y);
+    for (let i=1;i<pts.length;i++){ const p=tf(pts[i][0],pts[i][1],jaw); ctx.lineTo(p.x,p.y); }
+    ctx.closePath();
+    ctx.fillStyle=`rgba(255,40,55,${0.14*alpha})`; ctx.fill();
+    ctx.strokeStyle=`rgba(255,75,85,${0.96*alpha})`; ctx.lineWidth=2.4; ctx.stroke();
+  }
+  ctx.save(); ctx.lineJoin='round'; ctx.lineCap='round';
+  ctx.shadowColor='#ff2a3a'; ctx.shadowBlur=16;
+  poly(CLAW_BASE,0);
+  poly(CLAW_JAW,  +openAngle);   // upper pincer
+  poly(CLAW_JAW_LO, -openAngle); // lower pincer
+  // a couple of facet lines for the 3D look
+  ctx.strokeStyle=`rgba(255,110,120,${0.6*alpha})`; ctx.lineWidth=1.4;
+  for (const jaw of [+openAngle,-openAngle]){
+    const a=tf(0.1,jaw>0?0.16:-0.16,jaw), b=tf(1.0,0.05*(jaw>0?1:-1),jaw);
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+  }
+  ctx.shadowBlur=0; ctx.restore();
+}
+
+/* ---------------- hand state + released logos ---------------- */
+const released = [];    // {x,y,t0,scale0,spin0}
+const held = {};        // hand key -> {x,y,scale,spin}  (eth tracking an open hand)
+const ETH_Z0=1.0, ETH_RECEDE=1.6;
+const lastEmit = {};        // hand key -> last spawn time (ms)
+const EMIT_INTERVAL = 150;  // ms between eths while a fist is held up
+let frameHoldUntil=0, lastFrame=null; // two-hand computer-frame smoothing
+let dbg=0;                  // debug preview: 1=computer 2=claw (keys c / x)
+function emit(key, x, y, scale, now){
+  if (now - (lastEmit[key]||0) < EMIT_INTERVAL) return;
+  lastEmit[key] = now;
+  const jx=(Math.random()-0.5)*18, jy=(Math.random()-0.5)*18;
+  released.push({ x:x+jx, y:y+jy, t0:now, scale0:scale, spin0:Math.random()*Math.PI*2 });
+}
+function releaseHeld(h){ released.push({x:h.x,y:h.y,t0:performance.now(),scale0:h.scale,spin0:h.spin}); }
+
+function dist2(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+// finger-extension count from landmarks (lenient so half-curled claw fingers count)
+function handPose(lm){
+  const w=lm[0]; const ext=[];
+  ext[0] = dist2(lm[4],w) > dist2(lm[2],w)*1.0;             // thumb (tip vs MCP)
+  const pairs=[[8,6],[12,10],[16,14],[20,18]];              // index,middle,ring,pinky
+  for (let i=0;i<4;i++) ext[i+1] = dist2(lm[pairs[i][0]],w) > dist2(lm[pairs[i][1]],w)*0.9;
+  const count=ext.filter(Boolean).length;
+  // 0-1 = fist, 2-3 = claw/pincher, 4-5 = open palm
+  return { ext, count, fistish: count<=1, clawish: count===2||count===3, open: count>=4 };
+}
+window.addEventListener('keydown', e=>{
+  if (e.key==='c') dbg = dbg===1?0:1;
+  if (e.key==='x') dbg = dbg===2?0:2;
+});
+
+/* ---------------- MediaPipe ---------------- */
+let recognizer=null, lastVideoTime=-1, lastResults=null;
+async function initVision(){
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  recognizer = await GestureRecognizer.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
+      delegate: "GPU",
+    },
+    runningMode: "VIDEO",
+    numHands: 2,
+  });
+}
+async function initCamera(){
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { width:{ideal:1280}, height:{ideal:720}, facingMode:"user" }, audio:false });
+  video.srcObject = stream;
+  await video.play();
+}
+
+// palm/fist center from landmarks 0,5,9,13,17 (normalized 0..1 in video frame)
+function palmCenter(lm){
+  const idx=[0,5,9,13,17]; let x=0,y=0;
+  for (const i of idx){ x+=lm[i].x; y+=lm[i].y; } x/=idx.length; y/=idx.length;
+  return {x,y};
+}
+
+/* ---------------- main loop ---------------- */
+function loop(now){
+  if (!last) last=now;
+  const dt=Math.min(0.05,(now-last)/1000); last=now;
+
+  // 1) dark tunnel background only — your camera is chroma-keyed over this in OBS
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.fillStyle='#06030d'; ctx.fillRect(0,0,W,H);
+
+  // 2) tunnel glow additively over the webcam
+  drawTunnel(dt);
+
+  // 3) hand detection
+  if (recognizer && video.readyState>=2 && video.currentTime!==lastVideoTime){
+    lastVideoTime=video.currentTime;
+    try { lastResults = recognizer.recognizeForVideo(video, now); } catch(e){}
+  }
+
+  // gather per-hand info
+  const hands=[];
+  if (lastResults && lastResults.landmarks){
+    for (let h=0; h<lastResults.landmarks.length; h++){
+      const lm=lastResults.landmarks[h];
+      const label=lastResults.handedness?.[h]?.[0]?.categoryName || ('h'+h);
+      const c=palmCenter(lm);
+      const sx=c.x*W, sy=c.y*H;                     // no mirror — matches un-flipped OBS video
+      const dx=(lm[9].x-lm[0].x)*W, dy=(lm[9].y-lm[0].y)*H;
+      const span=Math.hypot(dx,dy);
+      hands.push({ key:label+h, lm, sx, sy, dx, dy, span, scale:Math.max(30,span*1.7), pose:handPose(lm) });
+    }
+  }
+
+  // two-hand "frame" -> summon the slop computer
+  let frame=null;
+  if (hands.length>=2){
+    const a=hands[0], b=hands[1];
+    const d=Math.hypot(a.sx-b.sx, a.sy-b.sy), avg=(a.span+b.span)/2;
+    if (d < avg*4.5 && !a.pose.fistish && !b.pose.fistish){
+      let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
+      for (const hi of [a,b]) for (const p of hi.lm){ const x=p.x*W,y=p.y*H;
+        if(x<minx)minx=x; if(x>maxx)maxx=x; if(y<miny)miny=y; if(y>maxy)maxy=y; }
+      frame={ cx:(minx+maxx)/2, cy:(miny+maxy)/2, size:Math.max(maxx-minx,maxy-miny)*1.15 };
+    }
+  }
+  if (frame){ frameHoldUntil = now + 200; lastFrame = frame; }
+
+  if (now < frameHoldUntil && lastFrame){
+    // computer mode: release any held eths, show the computer
+    for (const key in held){ releaseHeld(held[key]); delete held[key]; }
+    drawComputer(lastFrame.cx, lastFrame.cy, Math.min(lastFrame.size, H*0.92), 1);
+  } else {
+    // per-hand behaviors
+    for (const hi of hands){
+      const angle=Math.atan2(hi.dy,hi.dx);
+      if (hi.pose.open){                                      // ✋ open palm -> eth tracks hand
+        const prev=held[hi.key];
+        held[hi.key]={ x:hi.sx, y:hi.sy, scale:hi.scale, spin:(prev?prev.spin:0)+dt*1.2 };
+      } else if (hi.pose.fistish){                            // ✊ fist -> drop + emit stream
+        if (held[hi.key]){ releaseHeld(held[hi.key]); delete held[hi.key]; }
+        emit(hi.key, hi.sx, hi.sy, hi.scale, now);
+      } else {                                                // 🦞 claw (2-3 fingers), opens with pinch
+        const pinchPx=Math.hypot((hi.lm[4].x-hi.lm[8].x)*W,(hi.lm[4].y-hi.lm[8].y)*H);
+        const openAmt=Math.max(0,Math.min(1,(pinchPx/Math.max(1,hi.span)-0.35)/1.0));
+        drawClaw(hi.sx, hi.sy, hi.span*2.4, angle, openAmt*0.5, 1);
+        if (held[hi.key]){ releaseHeld(held[hi.key]); delete held[hi.key]; }
+      }
+    }
+    // release eths for hands that left the frame
+    const present={}; hands.forEach(h=>present[h.key]=1);
+    for (const key in held){ if(!present[key]){ releaseHeld(held[key]); delete held[key]; } }
+  }
+
+  // 4) released logos receding to the vanishing point
+  const VPx=W*0.5, VPy=H*VP_Y;
+  for (let i=released.length-1;i>=0;i--){
+    const L=released[i]; const age=(now-L.t0)/1000;
+    const z=ETH_Z0+ETH_RECEDE*age; const k=1-ETH_Z0/z;
+    if (k>0.5){ released.splice(i,1); continue; }
+    const px=L.x+(VPx-L.x)*k, py=L.y+(VPy-L.y)*k;
+    let alpha=1; if (k>0.22) alpha=Math.max(0,1-(k-0.22)/0.28);
+    drawEth(px,py, L.scale0*(ETH_Z0/z), L.spin0+age*0.9, alpha);
+  }
+  // 5) eths tracking open hands
+  for (const key in held){ const h=held[key]; drawEth(h.x,h.y,h.scale,h.spin,1); }
+
+  // debug previews (press c = computer, x = claw)
+  if (dbg===1) drawComputer(W*0.5,H*0.5,H*0.55,1);
+  if (dbg===2) drawClaw(W*0.5,H*0.5,H*0.16,0,0.32,1);
+
+  requestAnimationFrame(loop);
+}
+
+(async function start(){
+  resize();
+  try {
+    statusEl.textContent='starting camera…';
+    await initCamera();
+    statusEl.textContent='loading hand model…';
+    await initVision();
+    statusEl.style.display='none';
+    requestAnimationFrame(loop);
+  } catch(err){
+    statusEl.innerHTML='could not start.<br><span style="font-size:14px">'+(err && err.message ? err.message : err)+'</span>';
+    console.error(err);
+  }
+})();
+</script>
+</body>
+</html>

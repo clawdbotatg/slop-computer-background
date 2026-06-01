@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8" />
+<title>slop hands monitor</title>
+<style>
+  html,body{margin:0;background:#06030d;overflow:hidden;height:100%}
+  canvas{display:block;width:100vw;height:100vh}
+  #hud{position:fixed;top:10px;left:14px;color:#bcff5b;
+    font:18px/1.5 "VT323","Courier New",monospace;text-shadow:0 0 6px #000;white-space:pre;pointer-events:none}
+</style></head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">waiting for /hands.sse …</div>
+<script>
+const cv=document.getElementById('c'), x=cv.getContext('2d'), hud=document.getElementById('hud');
+let W,H,DPR;
+function rs(){ DPR=Math.min(devicePixelRatio||1,2); W=innerWidth; H=innerHeight;
+  cv.width=W*DPR; cv.height=H*DPR; x.setTransform(DPR,0,0,DPR,0,0); }
+addEventListener('resize',rs); rs();
+
+// MediaPipe-order skeleton bones
+const BONES=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],
+  [0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
+function dist(a,b){ return Math.hypot(a[0]-b[0],a[1]-b[1]); }
+// same finger-count logic the foreground uses
+function pose(lm){
+  const w=lm[0], ext=[];
+  ext[0]=dist(lm[4],w)>dist(lm[2],w)*1.0;
+  const pr=[[8,6],[12,10],[16,14],[20,18]];
+  for(let i=0;i<4;i++) ext[i+1]=dist(lm[pr[i][0]],w)>dist(lm[pr[i][1]],w)*0.9;
+  const c=ext.filter(Boolean).length;
+  return c>=4 ? 'OPEN ✋' : (c<=1 ? 'FIST ✊' : 'CLAW 🦞')+' '+c;
+}
+
+let hands=[], last=0;
+const es=new EventSource('/hands.sse');
+es.onmessage=e=>{ try{ hands=(JSON.parse(e.data).hands)||[]; last=performance.now(); }catch(_){ } };
+es.onerror=()=>{ hud.textContent='SSE error — is slop-server.py running on :9911?'; };
+
+// live capture frame from the detector (what Vision actually sees)
+const cap=new Image(); let capReady=false;
+cap.onload=()=>{ capReady=true; }; cap.onerror=()=>{ capReady=false; };
+setInterval(()=>{ cap.src='/slop-capture.jpg?t='+Date.now(); }, 150);
+
+function draw(){
+  if(capReady){ try{ x.drawImage(cap,0,0,W,H); }catch(_){ x.fillStyle='#06030d'; x.fillRect(0,0,W,H);} }
+  else { x.fillStyle='#06030d'; x.fillRect(0,0,W,H); }
+  const stale=performance.now()-last>1500;
+  let info='hands: '+hands.length+(stale?'  (no data — run ./slop-detector)':'')+'\n';
+  hands.forEach(h=>{
+    if(!h.lm || h.lm.length<21){ info+='  '+(h.chirality||'?')+': (incomplete '+(h.lm?h.lm.length:0)+' pts)\n'; return; }
+    const lm=h.lm.map(p=>[p[0]*W,p[1]*H]);
+    x.strokeStyle='#3fcfff'; x.lineWidth=2; x.beginPath();
+    for(const [a,b] of BONES){ x.moveTo(lm[a][0],lm[a][1]); x.lineTo(lm[b][0],lm[b][1]); }
+    x.stroke();
+    x.fillStyle='#ff3ec9';
+    for(const p of lm){ x.beginPath(); x.arc(p[0],p[1],4,0,7); x.fill(); }
+    let g='?'; try{ g=pose(h.lm); }catch(_){}
+    info+='  '+(h.chirality||'?')+': '+g+'\n';
+  });
+  hud.textContent=info;
+  requestAnimationFrame(draw);
+}
+draw();
+</script></body></html>

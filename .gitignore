@@ -1,0 +1,15 @@
+# Build artifacts (slop-detector is compiled by slop-setup.sh from slop-detector.swift)
+slop-detector
+__pycache__/
+*.pyc
+
+# Runtime artifacts (may contain camera frames of the operator — never commit)
+slop-capture.jpg
+*.tmp
+
+# Local Chrome profiles, logs
+.slop-chrome-*/
+*.log
+
+# macOS
+.DS_Store
