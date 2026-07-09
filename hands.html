@@ -22,14 +22,29 @@ addEventListener('resize',rs); rs();
 const BONES=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],
   [0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
 function dist(a,b){ return Math.hypot(a[0]-b[0],a[1]-b[1]); }
-// same finger-count logic the foreground uses
-function pose(lm){
-  const w=lm[0], ext=[];
-  ext[0]=dist(lm[4],w)>dist(lm[2],w)*1.0;
+// SAME signature classifier as foreground.html (lm here are [x,y] arrays)
+const THUMB_OUT=0.10;
+// signed, chirality-free thumb-out value: + when splayed to the radial side, - when tucked across
+function thumbSigned(lm){
+  const ux=lm[9][0]-lm[0][0], uy=lm[9][1]-lm[0][1], ul=Math.hypot(ux,uy)||1;
+  const nx=-uy/ul, ny=ux/ul;
+  const lat=p=>((p[0]-lm[0][0])*nx+(p[1]-lm[0][1])*ny);
+  return (lat(lm[4])*Math.sign(lat(lm[1])||1))/ul;
+}
+function ext5(lm){
+  const w=lm[0], e=[];
+  e[0]=thumbSigned(lm)>THUMB_OUT;                             // thumb splayed OUT (signed, chirality-free)
   const pr=[[8,6],[12,10],[16,14],[20,18]];
-  for(let i=0;i<4;i++) ext[i+1]=dist(lm[pr[i][0]],w)>dist(lm[pr[i][1]],w)*0.9;
-  const c=ext.filter(Boolean).length;
-  return c>=4 ? 'OPEN ✋' : (c<=1 ? 'FIST ✊' : 'CLAW 🦞')+' '+c;
+  for(let i=0;i<4;i++) e[i+1]=dist(lm[pr[i][0]],w)>dist(lm[pr[i][1]],w)*0.9;
+  return e;
+}
+function classify(e){
+  const [t,i,m,r,p]=e, c=e.filter(Boolean).length;
+  if(c<=1)               return 'FIST ✊';
+  if(i&&p&&!m&&!r)       return 'HORNS 🤘';
+  if(t&&i&&m&&!r&&!p)    return 'CLAW 🦞';
+  if(t&&i&&!m&&!r&&!p)   return 'L 📐';
+  return 'none';
 }
 
 let hands=[], last=0;
@@ -61,8 +76,10 @@ function draw(){
     x.stroke();
     x.fillStyle='#ff3ec9';
     for(const p of lm){ x.beginPath(); x.arc(p[0],p[1],4,0,7); x.fill(); }
-    let g='?'; try{ g=pose(h.lm); }catch(_){}
-    info+='  '+(h.chirality||'?')+': '+g+'\n';
+    let line='?'; try{ const e=ext5(h.lm);
+      line='['+e.map(b=>b?1:0).join('')+'] '+classify(e)+'  ts='+thumbSigned(h.lm).toFixed(2);
+    }catch(_){}
+    info+='  '+(h.chirality||'?')+': '+line+'\n';
   });
   hud.textContent=info;
 }

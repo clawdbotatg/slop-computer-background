@@ -24,6 +24,7 @@ const FG_BG = '#000000';
 const MIRROR = false;        // flip if the rendered objects land on the wrong side vs your composite
 const VP_Y = 0.35;           // must match background's vanishing point
 const CLAW_INWARD = 40 * Math.PI / 180;  // rotate each claw this much toward screen-center
+const THUMB_OUT = 0.10;      // thumb-out cutoff: tip's signed sideways offset must exceed this to count as splayed (separates 🦞 claw from ✌️ peace)
 // thin geometric cockpit-hull border (in PIXELS): a narrow band around the edge,
 // flood-filled with rungs + diagonal hatch + concentric rails. Overlays you (fg in front).
 const FRAME = true;
@@ -71,13 +72,30 @@ es.onmessage = e => {
 function dist2(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
 function palmCenter(lm){ const idx=[0,5,9,13,17]; let x=0,y=0;
   for(const i of idx){ x+=lm[i].x; y+=lm[i].y; } return {x:x/idx.length, y:y/idx.length}; }
-function handPose(lm){
+// per-finger extension [thumb,index,middle,ring,pinky] — robust binary signature
+// thumb "out" = tip swung to the radial side of the palm axis (🦞 crab) vs tucked across it (✌️ peace).
+// SIGNED, and chirality-free: lm[1] (thumb CMC) marks this hand's radial side, so we sign-correct by it.
+function thumbOut(lm){
+  const ux=lm[9].x-lm[0].x, uy=lm[9].y-lm[0].y, ul=Math.hypot(ux,uy)||1;
+  const nx=-uy/ul, ny=ux/ul;                              // unit perpendicular to the palm axis
+  const lat = p => ((p.x-lm[0].x)*nx + (p.y-lm[0].y)*ny);  // signed sideways offset from the wrist
+  return (lat(lm[4]) * Math.sign(lat(lm[1]) || 1)) / ul > THUMB_OUT;
+}
+function fingerExt(lm){
   const w=lm[0], ext=[];
-  ext[0] = dist2(lm[4],w) > dist2(lm[2],w)*1.0;
+  ext[0] = thumbOut(lm);                                  // thumb splayed OUT (signed) — not merely long
   const pr=[[8,6],[12,10],[16,14],[20,18]];
   for(let i=0;i<4;i++) ext[i+1] = dist2(lm[pr[i][0]],w) > dist2(lm[pr[i][1]],w)*0.9;
-  const count=ext.filter(Boolean).length;
-  return { count, fistish:count<=1, open:count>=4 };
+  return ext;
+}
+// map a finger signature to a DELIBERATE gesture; unrecognized -> 'none' (neutral, draws nothing)
+function classify(ext){
+  const [t,i,m,r,p]=ext, count=ext.filter(Boolean).length;
+  if(count<=1)                  return 'fist';   // ✊ emit eth stream to background (kept — it's perfect)
+  if(i && p && !m && !r)        return 'horns';  // 🤘 hold eth on the hand (replaces open-palm)
+  if(t && i && m && !r && !p)   return 'claw';   // 🦞 thumb+index+middle up, ring+pinky down (differs from ✌️ peace only by the thumb)
+  if(t && i && !m && !r && !p)  return 'L';      // 📐 frame corner; two of these summon the computer
+  return 'none';                                 // ✋ open palm, points, transitions = do nothing
 }
 
 // thin geometric border: 3 concentric rails + dense perpendicular rungs + diagonal hatch
@@ -188,8 +206,10 @@ const heldEth = {};      // key -> {x,y,scale,spin}
 const heldClaw = {};     // key -> {x,y,scale,angle,open}
 const lastEmit = {};
 const EMIT_INTERVAL = 150;
+const poseState = {};          // key -> {name, since} for hold-to-activate debounce
+const HOLD_MS = 150;           // a signature must be stable this long before it fires
 let compActive=false, lastComp=null, frameHoldUntil=0, dbg=0;
-window.addEventListener('keydown', e=>{ if(e.key==='c')dbg=dbg===1?0:1; if(e.key==='x')dbg=dbg===2?0:2; });
+window.addEventListener('keydown', e=>{ if(e.key==='c')dbg=dbg===1?0:1; if(e.key==='x')dbg=dbg===2?0:2; if(e.key==='g')dbg=dbg===3?0:3; });
 
 // cap redraw to ~30fps to match OBS output (was running at full display refresh)
 const FPS=30, FRAME_MS=1000/FPS;
@@ -223,15 +243,27 @@ function loop(now){
     const sx=c.x*W, sy=c.y*H;
     const dx=(lm[9].x-lm[0].x)*W, dy=(lm[9].y-lm[0].y)*H;
     const span=Math.hypot(dx,dy);
-    hands.push({ key:(h.chirality||'h')+idx, lm, sx, sy, dx, dy, span, scale:Math.max(30,span*1.7), pose:handPose(lm) });
+    const ext=fingerExt(lm);
+    const ab = dist2(lm[4],lm[5]) / Math.max(1e-6, dist2(lm[0],lm[9]));   // thumb abduction (for debug readout)
+    hands.push({ key:(h.chirality||'h')+idx, lm, sx, sy, dx, dy, span, scale:Math.max(30,span*1.7), ext, ab, raw:classify(ext) });
   });
+
+  // hold-to-activate: a signature only fires after it's been stable for HOLD_MS,
+  // so transient finger configs while the hand moves in/out don't trigger effects.
+  // EXCEPTION: 'fist' fires instantly (snappy bg-eth drops, as it was originally).
+  for(const hi of hands){
+    const st = poseState[hi.key] || (poseState[hi.key]={ name:hi.raw, since:now });
+    if(st.name!==hi.raw){ st.name=hi.raw; st.since=now; }
+    hi.pose = (hi.raw==='fist' || now-st.since>=HOLD_MS) ? hi.raw : 'none';
+  }
+  for(const k in poseState){ if(!hands.some(h=>h.key===k)) delete poseState[k]; }
 
   // two-hand frame -> hold the computer
   let frame=null;
   if(hands.length>=2){
     const a=hands[0], b=hands[1];
     const d=Math.hypot(a.sx-b.sx, a.sy-b.sy), avg=(a.span+b.span)/2;
-    if(d < avg*4.5 && !a.pose.fistish && !b.pose.fistish){
+    if(a.pose==='L' && b.pose==='L' && d < avg*7){
       let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
       for(const hi of [a,b]) for(const p of hi.lm){ const x=p.x*W,y=p.y*H;
         if(x<minx)minx=x; if(x>maxx)maxx=x; if(y<miny)miny=y; if(y>maxy)maxy=y; }
@@ -248,18 +280,18 @@ function loop(now){
     if(compActive){ send('computer', lastComp.cx, lastComp.cy, lastComp.size); compActive=false; }
     for(const hi of hands){
       const angle=Math.atan2(hi.dy,hi.dx);
-      if(hi.pose.open){                                   // ✋ eth tracks the hand
+      if(hi.pose==='horns'){                               // 🤘 eth tracks the hand
         const prev=heldEth[hi.key];
         heldEth[hi.key]={ x:hi.sx, y:hi.sy, scale:hi.scale, spin:(prev?prev.spin:0)+dt*1.2 };
         ethSeen[hi.key]=1;
         drawEth(ctx, hi.sx, hi.sy, hi.scale, heldEth[hi.key].spin, 1);
-      } else if(hi.pose.fistish){                          // ✊ drop + emit stream
+      } else if(hi.pose==='fist'){                          // ✊ drop + emit stream to background
         if(now-(lastEmit[hi.key]||0) >= EMIT_INTERVAL){
           lastEmit[hi.key]=now;
           const jx=(Math.random()-0.5)*18, jy=(Math.random()-0.5)*18;
           send('eth', hi.sx+jx, hi.sy+jy, hi.scale, { spin:Math.random()*6.28 });
         }
-      } else {                                             // 🦞 claw, opens with pinch
+      } else if(hi.pose==='claw'){                          // 🦞 claw, opens with pinch
         const pinchPx=Math.hypot((hi.lm[4].x-hi.lm[8].x)*W,(hi.lm[4].y-hi.lm[8].y)*H);
         const openAmt=Math.max(0,Math.min(1,(pinchPx/Math.max(1,hi.span)-0.35)/1.0))*0.5;
         const clawAngle = angle + (hi.sx < W/2 ? 1 : -1) * CLAW_INWARD;  // tilt inward
@@ -278,6 +310,21 @@ function loop(now){
 
   if(dbg===1) drawComputer(ctx, W*0.5, H*0.5, H*0.55, 1);
   if(dbg===2) drawClaw(ctx, W*0.5, H*0.5, H*0.16, 0, 0.32, 1);
+  if(dbg===3){   // pose readout: [thumb,index,middle,ring,pinky] raw -> active, + thumb abduction value
+    ctx.save(); ctx.setTransform(DPR,0,0,DPR,0,0); ctx.font='14px monospace'; ctx.textBaseline='top';
+    hands.forEach((hi,i)=>{
+      const lm=hi.lm, palm=Math.max(1e-6,dist2(lm[0],lm[9]));
+      const t45=(dist2(lm[4],lm[5])/palm).toFixed(2);          // thumb tip -> index knuckle (current metric)
+      const t48=(dist2(lm[4],lm[8])/palm).toFixed(2);          // thumb tip -> index TIP
+      const aX=lm[4].x-lm[2].x, aY=lm[4].y-lm[2].y, bX=lm[8].x-lm[5].x, bY=lm[8].y-lm[5].y;
+      const ang=Math.round(Math.acos(Math.max(-1,Math.min(1,(aX*bX+aY*bY)/((Math.hypot(aX,aY)*Math.hypot(bX,bY))||1))))*180/Math.PI);
+      const t=`[${hi.ext.map(b=>b?1:0).join('')}] ${hi.raw}->${hi.pose}  t45=${t45} t48=${t48} ang=${ang}`;
+      ctx.fillStyle='#000'; ctx.fillText(t,13,13+i*20);
+      ctx.fillStyle='#bcff5b'; ctx.fillText(t,12,12+i*20);
+    });
+    if(!hands.length){ ctx.fillStyle='#bcff5b'; ctx.fillText('(no hands)',12,12); }
+    ctx.restore();
+  }
 }
 resize();
 requestAnimationFrame(loop);
