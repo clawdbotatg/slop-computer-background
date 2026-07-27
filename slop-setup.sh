@@ -209,14 +209,18 @@ echo ""
 osascript -e "tell application \"iTerm2\" to set bounds of current window to {$ITERM_BOUNDS}" 2>/dev/null || true
 
 # ── KICK EVERYTHING OFF: run the hand detector in THIS terminal (foreground) ────
-# Reads the OBS "Windowed Projector (Source) - Syphon Client" (clean feed) and POSTs
-# hand landmarks to the relay. Auto-retries until that projector window exists, so:
-#   • Open the Syphon source's Windowed Projector once, and enable OBS → Settings →
+# Reads the OBS Source projector of the clean camera feed (e.g. "Projector -
+# Source: a6400 HDMI") and POSTs hand landmarks to the relay. Auto-retries until
+# that projector window exists, so:
+#   • Open the camera source's Windowed Projector once, and enable OBS → Settings →
 #     General → "Save projectors on exit" so OBS reopens it automatically.
+# Title filter is "Source" (not "Projector"): OBS also restores "Projector -
+# Preview" windows, and a phantom one from a missing display once out-sized the
+# real feed and delivered zero frames — Source projectors match, Preview never.
 # Ctrl-C here stops the detector. Closing this window ends the session's hand input.
 if [ -x "$DIR/slop-detector" ]; then
   echo "Starting hand detector in this terminal (Ctrl-C to stop)..."
-  exec "$DIR/slop-detector"
+  exec "$DIR/slop-detector" OBS "Source"
 else
   echo "slop-detector not built — hand detection won't run."
 fi
