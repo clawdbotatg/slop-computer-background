@@ -1,0 +1,26 @@
+#!/bin/bash
+# SLOP launcher — runs slop-setup.sh inside iTerm2.
+# Why iTerm2: slop-obs-patch.py uses Quartz CGWindowListCopyWindowInfo which
+# requires Screen Recording permission. iTerm2 has it; Terminal.app does not.
+#
+# __REPO_DIR__ is baked in by install.sh (this file is a template in the repo).
+
+open -ga iTerm
+for i in $(seq 1 20); do
+    if osascript -e 'tell application "iTerm2" to return name' >/dev/null 2>&1; then break; fi
+    sleep 0.5
+done
+
+osascript <<'APPLESCRIPT'
+tell application "iTerm2"
+    activate
+    set newWindow to (create window with default profile)
+    tell current session of newWindow
+        write text "bash __REPO_DIR__/slop-setup.sh"
+    end tell
+    -- park it where you keep it (matches ITERM_BOUNDS in the script)
+    try
+        set bounds of newWindow to {-3195, -594, -2615, -54}
+    end try
+end tell
+APPLESCRIPT

@@ -13,3 +13,7 @@ slop-capture.jpg
 
 # macOS
 .DS_Store
+
+# real stream creds must never land here — only the .template is committed
+rig/obs/profiles/Rig2/service.json
+service.json

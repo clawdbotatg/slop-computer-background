@@ -1,0 +1,9 @@
+#!/bin/bash
+# Launches an isolated OBS instance for the "Rig2" profile + collection.
+RIG="Rig2"
+open -n -a OBS.app --args \
+  --multi \
+  --profile "$RIG" \
+  --collection "$RIG" \
+  --disable-updater \
+  --disable-missing-files-check
