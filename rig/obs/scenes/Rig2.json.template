@@ -1082,7 +1082,22 @@
             "fade_to_black": true
         }
     ],
-    "saved_projectors": [],
+    "saved_projectors": [
+        {
+            "name": "a6400 HDMI",
+            "monitor": -1,
+            "type": 0,
+            "geometry": "AdnQywADAAD///gtAAAFb///+gwAAAad///4LQAABY////oMAAAGnQAAAAIAAAAACgD///gtAAAFj///+gwAAAad",
+            "alwaysOnTopOverridden": false
+        },
+        {
+            "name": "teleprompter",
+            "monitor": 1,
+            "type": 1,
+            "geometry": "AdnQywADAAAAAAoAAAABaAAAEX8AAAWfAAAKAAAAAWgAABF/AAAFnwAAAAEABAAAB4AAAAoAAAABaAAAEX8AAAWf",
+            "alwaysOnTopOverridden": false
+        }
+    ],
     "preview_locked": false,
     "scaling_enabled": false,
     "scaling_level": -5,

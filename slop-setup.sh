@@ -35,17 +35,17 @@ PROFILE_MON="$HOME/.slop-chrome-mon"   # the hands.html monitor window (its own 
 
 # Per-window size + position (top-left x,y), captured from where you placed them.
 # Foreground is intentionally a touch taller than the background.
-FG_X=-2832; FG_Y=-813; FG_W=1280; FG_H=766
-BG_X=-3114; BG_Y=-801; BG_W=1280; BG_H=748
+FG_X=-2430; FG_Y=454; FG_W=1280; FG_H=766
+BG_X=-2495; BG_Y=409; BG_W=1280; BG_H=748
 # hands.html monitor — where you placed it
-MON_X=-3141; MON_Y=-711; MON_W=960; MON_H=560
+MON_X=-2548; MON_Y=1181; MON_W=960; MON_H=560
 # iTerm window (running this script + the detector) — set by SLOP.app's launcher too
-ITERM_BOUNDS="-3195, -594, -2615, -54"
+ITERM_BOUNDS="-2549, 537, -1930, 1067"
 
 # ── CONTROL WINDOW (main Chrome) ────────────────────────────────────────────────
 # These four URLs open as TABS in ONE main-Chrome window, positioned at:
 # {Left, Top, Right, Bottom}. Adjust after you see it.
-CONTROL_BOUNDS="622, 67, 2252, 1090"
+CONTROL_BOUNDS="166, 371, 1698, 1247"
 CONTROL_URLS=(
   "https://slop.computer/"
   "https://slop.computer/admin"
@@ -71,8 +71,16 @@ fi
 
 # ── KILL OBS + slop browsers + server + detector ───────────────────────────────
 echo "Killing OBS, slop browsers, server, detector..."
-osascript -e 'tell application "OBS" to quit' 2>/dev/null || true
+# Ask OBS to quit nicely, but under a watchdog: a modal dialog (exit confirm,
+# missing-files, crash recovery) makes the AppleScript quit block FOREVER and
+# has stalled this whole script before. 6s, then we escalate.
+osascript -e 'tell application "OBS" to quit' >/dev/null 2>&1 &
+OSA_PID=$!
+for i in $(seq 1 6); do kill -0 $OSA_PID 2>/dev/null || break; sleep 1; done
+kill $OSA_PID 2>/dev/null || true
 pkill -f "OBS.app/Contents/MacOS/OBS" 2>/dev/null || true
+for i in $(seq 1 8); do pgrep -f "OBS.app/Contents/MacOS/OBS" >/dev/null || break; sleep 1; done
+pgrep -f "OBS.app/Contents/MacOS/OBS" >/dev/null && { echo "  OBS ignored quit (dialog up?) — force-killing"; pkill -9 -f "OBS.app/Contents/MacOS/OBS"; }
 # Only the isolated slop Chrome instances — main Chrome is untouched.
 pkill -f -- "--user-data-dir=$PROFILE_FG" 2>/dev/null || true
 pkill -f -- "--user-data-dir=$PROFILE_BG" 2>/dev/null || true
@@ -83,6 +91,60 @@ sleep 2
 until ! pgrep -f -- "--user-data-dir=$PROFILE_FG" >/dev/null \
    && ! pgrep -f -- "--user-data-dir=$PROFILE_BG" >/dev/null \
    && ! pgrep -f -- "--user-data-dir=$PROFILE_MON" >/dev/null; do sleep 1; done
+
+# ── BRING UP slop.computer CONTROL WINDOWS in MAIN Chrome ───────────────────────
+# This runs HERE — while the isolated fg/bg/mon Chrome instances are dead — on
+# purpose: with several Chrome instances alive, AppleScript's
+# 'tell application "Google Chrome"' can route to an isolated instance and
+# silently no-op (no error, nothing closed, nothing positioned). Right after the
+# kill above, main Chrome is the only instance, so the events land correctly.
+# The teleprompter scene window-captures this window; the patcher below re-points
+# it at the NEWEST main-Chrome window, i.e. the one created here.
+echo "Bringing up slop.computer control window (4 tabs in main Chrome)..."
+# De-dupe: close any existing main-Chrome window that already has a slop.computer
+# tab (checks every tab, not just the active one). Errors go to the log, not
+# /dev/null — an Automation-permission denial here is otherwise invisible.
+osascript >>/tmp/slop-chrome-osa.log 2>&1 <<'EOF'
+tell application "Google Chrome"
+  -- collect stable window IDs, not index references: closing a window renumbers
+  -- the indices, so "close w" on stored references silently misses the rest
+  set idsToClose to {}
+  repeat with w in windows
+    repeat with t in tabs of w
+      try
+        if (URL of t) contains "slop.computer" then
+          set end of idsToClose to (id of w)
+          exit repeat
+        end if
+      end try
+    end repeat
+  end repeat
+  repeat with wid in idsToClose
+    try
+      close (first window whose id is (contents of wid))
+    end try
+  end repeat
+end tell
+EOF
+# Open all four as tabs in ONE new window (binary launch lands in your main Chrome).
+"$CHROME" --new-window "${CONTROL_URLS[@]}" >/dev/null 2>&1 &
+disown
+sleep 3
+# Position that window (match the window holding the slop.computer tabs).
+osascript >>/tmp/slop-chrome-osa.log 2>&1 <<EOF
+tell application "Google Chrome"
+  repeat with w in windows
+    repeat with t in tabs of w
+      try
+        if (URL of t) contains "slop.computer" then
+          set bounds of w to {$CONTROL_BOUNDS}
+          exit repeat
+        end if
+      end try
+    end repeat
+  end repeat
+end tell
+EOF
 
 # ── BUILD the detector if needed ────────────────────────────────────────────────
 if [ ! -x "$DIR/slop-detector" ] || [ "$DIR/slop-detector.swift" -nt "$DIR/slop-detector" ]; then
@@ -131,15 +193,19 @@ FG_PID=$(pgrep -f "slop-chrome-fg.*--app" | head -1)
 echo "  foreground pid=$FG_PID  background pid=$BG_PID"
 
 # ── PATCH the Rig2 (SLOP) scene with the new window IDs (OBS must be closed) ─────
-echo "Patching OBS Rig2 scene (sloptubefront / sloptuberender)..."
-python3 "$DIR/slop-obs-patch.py" "$FG_PID" "$BG_PID" || { echo "Patch failed — are both windows open?"; }
+# Also re-points the teleprompter scene's screen capture at the control window
+# (its window ID rotates every launch), enforces SaveProjectors=true, and makes
+# sure the teleprompter fullscreen projector (CF15T) + a6400 windowed projector
+# are in saved_projectors so OBS reopens them on start.
+echo "Patching OBS Rig2 scene (sloptubefront / sloptuberender / teleprompter)..."
+python3 "$DIR/slop-obs-patch.py" "$FG_PID" "$BG_PID" --teleprompter "$CONTROL_BOUNDS" || { echo "Patch failed — are both windows open?"; }
 
 # ── LAUNCH OBS-SLOP (reads the patched scene) ───────────────────────────────────
 echo "Launching OBS-SLOP..."
 open "$HOME/Desktop/OBS-SLOP.app"
 # Wait for OBS's window to exist, then move/resize it to where you want it.
 # (OBS isn't AppleScript-scriptable, so we drive it via System Events.)
-OBS_POS="-1492, -752"      # captured from where you placed it
+OBS_POS="-1548, 499"      # captured from where you placed it
 OBS_SIZE="1464, 831"
 for i in $(seq 1 40); do
   if osascript -e 'tell application "System Events" to tell process "OBS" to exists front window' 2>/dev/null | grep -q true; then break; fi
@@ -155,53 +221,10 @@ open -n -a "Google Chrome" --args --user-data-dir="$PROFILE_MON" \
   --window-position=${MON_X},${MON_Y} --window-size=${MON_W},${MON_H} \
   --no-first-run --no-default-browser-check >/dev/null 2>&1
 
-# ── BRING UP slop.computer CONTROL WINDOWS in MAIN Chrome ───────────────────────
-echo "Bringing up slop.computer control window (4 tabs in main Chrome)..."
-# De-dupe: close any existing main-Chrome window that already has a slop.computer
-# tab (checks every tab, not just the active one).
-osascript >/dev/null 2>&1 <<'EOF'
-tell application "Google Chrome"
-  set toClose to {}
-  repeat with w in windows
-    repeat with t in tabs of w
-      try
-        if (URL of t) contains "slop.computer" then
-          set end of toClose to w
-          exit repeat
-        end if
-      end try
-    end repeat
-  end repeat
-  repeat with w in toClose
-    try
-      close w
-    end try
-  end repeat
-end tell
-EOF
-# Open all four as tabs in ONE new window (binary launch lands in your main Chrome).
-"$CHROME" --new-window "${CONTROL_URLS[@]}" >/dev/null 2>&1 &
-disown
-sleep 3
-# Position that window (match the window holding the slop.computer tabs).
-osascript >/dev/null 2>&1 <<EOF
-tell application "Google Chrome"
-  repeat with w in windows
-    repeat with t in tabs of w
-      try
-        if (URL of t) contains "slop.computer" then
-          set bounds of w to {$CONTROL_BOUNDS}
-          exit repeat
-        end if
-      end try
-    end repeat
-  end repeat
-end tell
-EOF
-
 echo ""
 echo "SLOP rig up."
 echo "  • OBS sources: sloptubefront → SLOPTUBE-FRONT,  sloptuberender → SLOPTUBE-BG"
+echo "  • teleprompter scene → slop.computer control window; projector on CF15T"
 echo "  • Hand monitor window open (hands.html)"
 echo ""
 

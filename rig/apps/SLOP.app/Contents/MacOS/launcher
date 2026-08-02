@@ -20,7 +20,7 @@ tell application "iTerm2"
     end tell
     -- park it where you keep it (matches ITERM_BOUNDS in the script)
     try
-        set bounds of newWindow to {-3195, -594, -2615, -54}
+        set bounds of newWindow to {-2549, 537, -1930, 1067}
     end try
 end tell
 APPLESCRIPT
