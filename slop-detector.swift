@@ -23,7 +23,7 @@ let args = CommandLine.arguments
 let TARGET_APP   = args.count > 1 ? args[1] : "OBS"
 let TARGET_TITLE = args.count > 2 ? args[2] : "Projector"
 let POST_URL     = URL(string: args.count > 3 ? args[3] : "http://localhost:9911/hands")!
-let FPS          = 15
+let FPS          = 10
 
 // Vision joints in MediaPipe's 0..20 index order so the browser's existing
 // finger-count/gesture logic works unchanged.
@@ -117,9 +117,9 @@ final class Detector: NSObject, SCStreamOutput, SCStreamDelegate {
         guard type == .screen, sampleBuffer.isValid,
               let px = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-        // dump a debug JPEG of exactly what we're capturing (~5/sec) so hands.html
+        // dump a debug JPEG of exactly what we're capturing (~1/sec) so hands.html
         // can show what Vision sees.
-        if frame % 3 == 0 {
+        if frame % FPS == 0 {
             let ci = CIImage(cvPixelBuffer: px)
             if let data = ciContext.jpegRepresentation(of: ci, colorSpace: CGColorSpaceCreateDeviceRGB(), options: [:]) {
                 let tmp = captureJPG + ".tmp"
