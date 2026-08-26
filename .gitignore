@@ -17,3 +17,6 @@ slop-capture.jpg
 # real stream creds must never land here — only the .template is committed
 rig/obs/profiles/Rig2/service.json
 service.json
+
+# gesture forward config (secret token — never commit)
+.slop-relay.env

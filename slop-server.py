@@ -10,12 +10,73 @@ can't reach between them):
 
 Stdlib only, no pip installs.  Usage:  python3 slop-server.py [port]
 """
-import json, queue, threading, sys, os
+import json, queue, threading, sys, os, time, urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from functools import partial
 
 DIR  = os.path.dirname(os.path.abspath(__file__))
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 9911
+
+# ---- optional: forward spawns to the shared slop-computer desktop ----------
+# When configured, every /spawn (an object released to the background) is ALSO
+# POSTed to live.slop.computer's relay (/v1/gesture), which broadcasts it to
+# every screen in the room — god mode included, so it lands on the stream.
+# Unconfigured = fully inert (the rig works exactly as before). Config lives
+# in gitignored .slop-relay.env next to this file (KEY=VALUE lines; the token
+# is a room-scoped agent token minted via /v1/agent-token) or plain env vars,
+# which win. Roll back = delete the env file or revert this commit.
+def _load_relay_cfg():
+    cfg = {}
+    try:
+        with open(os.path.join(DIR, '.slop-relay.env')) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    k, v = line.split('=', 1)
+                    cfg[k.strip()] = v.strip()
+    except OSError:
+        pass
+    cfg.update({k: v for k, v in os.environ.items() if k.startswith('SLOP_RELAY_')})
+    url, tok, room = cfg.get('SLOP_RELAY_URL'), cfg.get('SLOP_RELAY_TOKEN'), cfg.get('SLOP_RELAY_ROOM')
+    return (url.rstrip('/'), tok, room) if url and tok and room else None
+
+RELAY = _load_relay_cfg()
+RELAY_KINDS = {'eth', 'claw'}       # relay rejects anything else; 'computer' stays local-only
+RELAY_MIN_GAP = 0.4                 # s between forwards — the fist stream fires every 150ms,
+                                    # which would drain the relay's chat rate bucket
+_relay_q = queue.Queue(maxsize=8)   # bounded fire-and-forget; drop rather than back up the rig
+
+def _relay_worker():
+    url, tok, room = RELAY
+    last_sent = 0.0
+    while True:
+        body = _relay_q.get()
+        now = time.monotonic()
+        if now - last_sent < RELAY_MIN_GAP:
+            continue
+        try:
+            d = json.loads(body)
+            if d.get('kind') not in RELAY_KINDS:
+                continue
+            payload = json.dumps({k: d[k] for k in ('kind', 'x', 'y', 's', 'spin', 'angle', 'open') if k in d}).encode()
+            req = urllib.request.Request(
+                f'{url}/v1/gesture?slug={room}', data=payload,
+                headers={'Authorization': f'Bearer {tok}', 'Content-Type': 'application/json'})
+            urllib.request.urlopen(req, timeout=3).read()
+            last_sent = now
+        except Exception as e:
+            print(f'relay forward failed: {e}', file=sys.stderr)
+
+if RELAY:
+    threading.Thread(target=_relay_worker, daemon=True).start()
+
+def relay_spawn(body):
+    if not RELAY:
+        return
+    try:
+        _relay_q.put_nowait(body)
+    except queue.Full:
+        pass
 
 # two channels: "spawn" (foreground -> background) and "hands" (detector -> foreground)
 channels = {"spawn": set(), "hands": set()}
@@ -51,6 +112,8 @@ class Handler(SimpleHTTPRequestHandler):
     def _pub(self, channel):
         n = int(self.headers.get('Content-Length', 0) or 0)
         body = self.rfile.read(n).decode('utf-8', 'ignore')
+        if channel == 'spawn':
+            relay_spawn(body)
         with clients_lock:
             targets = list(channels[channel])
         for q in targets:
@@ -79,6 +142,7 @@ class Handler(SimpleHTTPRequestHandler):
 if __name__ == '__main__':
     srv = ThreadingHTTPServer(('127.0.0.1', PORT), partial(Handler, directory=DIR))
     print(f'slop-server on http://localhost:{PORT}  (static + POST /spawn + SSE /events)')
+    print(f'shared-desktop forward: {"ON -> " + RELAY[0] + " room " + RELAY[2] if RELAY else "off (no .slop-relay.env)"}')
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
