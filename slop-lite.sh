@@ -99,6 +99,9 @@ echo ""
 echo "SLOP lite recovery done: foreground + background + detector."
 echo ""
 
+# ── PARK THIS iTerm WINDOW next to the capture region ──────────────────────────
+osascript -e "tell application \"iTerm2\" to set bounds of current window to {$ITERM_BOUNDS}" 2>/dev/null || true
+
 # ── RUN the hand detector in THIS terminal (Ctrl-C stops it) ───────────────────
 if [ -x "$DIR/slop-detector" ]; then
   echo "Starting hand detector in this terminal (Ctrl-C to stop)..."

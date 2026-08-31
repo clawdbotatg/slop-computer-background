@@ -1,0 +1,77 @@
+==============================================================================
+DISPLAYS
+==============================================================================
+  [0] id=2    origin=(-2160,-1301)  2160x3840
+  [1] id=3    origin=(0,0)  2560x1440   <- MAIN
+  [2] id=1    origin=(2560,360)  1920x1080
+
+==============================================================================
+WINDOWS  (grouped by display; xywh for Chrome flags, LTRB for AppleScript)
+==============================================================================
+
+--- display id=2  (2160x3840 @ -2160,-1301) ---
+  Google Chrome: 'SLOPTUBE-BG'
+      xywh: x=-2132 y=-1197 w=1280 h=748      LTRB: -2132, -1197, -852, -449      winid=14308
+  Google Chrome: 'SLOPTUBE-FRONT'
+      xywh: x=-2045 y=-1137 w=1280 h=766      LTRB: -2045, -1137, -765, -371      winid=14323
+  OBS Studio: 'OBS Studio 32.2.0 - Profile: Rig2 - Scenes: Rig2'
+      xywh: x=-1528 y=-1074 w=1280 h=992      LTRB: -1528, -1074, -248, -82      winid=14338
+  iTerm: 'Google Chrome Helper"'
+      xywh: x=-2152 y=-572 w=619 h=530      LTRB: -2152, -572, -1533, -42      winid=14267
+  OBS Studio: 'Projector - Source: a6400 HDMI'
+      xywh: x=-1860 y=-1 w=480 h=302      LTRB: -1860, -1, -1380, 301      winid=14353
+  Google Chrome: 'slop hands monitor'
+      xywh: x=-2155 y=82 w=960 h=560      LTRB: -2155, 82, -1195, 642      winid=14405
+  Firefox: 'Your Repositories'
+      xywh: x=-1106 y=590 w=1054 h=971      LTRB: -1106, 590, -52, 1561      winid=13435
+  Telegram: 'Telegram @ Austin'  (other Space / hidden)
+      xywh: x=-1135 y=779 w=1081 h=742      LTRB: -1135, 779, -54, 1521      winid=78
+  Notes: 'All iCloud'
+      xywh: x=-1602 y=1486 w=1192 h=608      LTRB: -1602, 1486, -410, 2094      winid=695
+  iTerm: '⠂ Review slop app window configuration'
+      xywh: x=-1882 y=1672 w=1049 h=802      LTRB: -1882, 1672, -833, 2474      winid=9495
+
+--- display id=3  (2560x1440 @ 0,0) ---
+  Google Chrome: 'New Tab'  (other Space / hidden)
+      xywh: x=0 y=0 w=1440 h=900      LTRB: 0, 0, 1440, 900      winid=8319
+  Google Chrome: 'Slop Computer'  (other Space / hidden)
+      xywh: x=0 y=0 w=1366 h=900      LTRB: 0, 0, 1366, 900      winid=6974
+  Google Chrome Canary: 'New Tab'  (other Space / hidden)
+      xywh: x=0 y=0 w=1366 h=900      LTRB: 0, 0, 1366, 900      winid=6980
+  Google Chrome: 'New Tab'  (other Space / hidden)
+      xywh: x=0 y=0 w=1366 h=900      LTRB: 0, 0, 1366, 900      winid=225
+  Google Chrome: 'slop.computer — onchain podcast'  (other Space / hidden)
+      xywh: x=1400 y=40 w=1150 h=660      LTRB: 1400, 40, 2550, 700      winid=14279
+  Google Chrome: 'Live Studio | X Studio'  (other Space / hidden)
+      xywh: x=296 y=41 w=1356 h=1099      LTRB: 296, 41, 1652, 1140      winid=14274
+  Google Chrome: 'Slop Computer'
+      xywh: x=271 y=70 w=1943 h=1217      LTRB: 271, 70, 2214, 1287      winid=14269
+  Google Chrome Canary: 'Restore pages?'  (other Space / hidden)
+      xywh: x=1039 y=80 w=320 h=238      LTRB: 1039, 80, 1359, 318      winid=6985
+  Google Chrome: 'Restore pages?'  (other Space / hidden)
+      xywh: x=1040 y=80 w=320 h=238      LTRB: 1040, 80, 1360, 318      winid=6979
+  Google Chrome: 'Restore pages?'  (other Space / hidden)
+      xywh: x=1114 y=80 w=320 h=238      LTRB: 1114, 80, 1434, 318      winid=8324
+  Google Chrome Canary: 'Live streaming - YouTube Studio'  (other Space / hidden)
+      xywh: x=38 y=99 w=1302 h=1235      LTRB: 38, 99, 1340, 1334      winid=14290
+  Calendar: 'Calendar'  (other Space / hidden)
+      xywh: x=345 y=393 w=935 h=598      LTRB: 345, 393, 1280, 991      winid=97
+  Google Chrome: 'Slop Computer'  (other Space / hidden)
+      xywh: x=1400 y=720 w=1150 h=660      LTRB: 1400, 720, 2550, 1380      winid=14285
+
+--- display id=1  (1920x1080 @ 2560,360) ---
+  OBS Studio: 'Projector - Scene: teleprompter'
+      xywh: x=2560 y=360 w=1920 h=1080      LTRB: 2560, 360, 4480, 1440      winid=14354
+
+==============================================================================
+OBS  (Rig2.json — reflects last save; OBS rewrites this on quit)
+==============================================================================
+
+  saved_projectors:
+    'a6400 HDMI' (source) -> windowed
+    'teleprompter' (scene) -> monitor 1
+
+  capture sources -> live window bindings:
+    'sloptuberender'  (window 14308)  ->  Google Chrome — SLOPTUBE-BG
+    'sloptubefront'  (window 14323)  ->  Google Chrome — SLOPTUBE-FRONT
+    'macOS Screen Capture'  (window 14269)  ->  Google Chrome — Slop Computer

@@ -107,12 +107,29 @@ def slop_chrome_pids():
         return set()
 
 def find_control_window():
-    """The main-Chrome control window: at CONTROL_BOUNDS first, newest-big fallback."""
+    """The main-Chrome control window: the one sitting at CONTROL_BOUNDS. No fallback.
+
+    Two fallbacks have been tried here and both bound the WRONG window:
+
+      • "newest big main-Chrome window" — slop-setup.sh opens the X producer
+        dashboard after the control window, so the teleprompter mirrored the
+        producer page.
+      • "window whose title looks like the show, excluding titles containing
+        'admin'" — the admin pages are titled just "Slop Computer" ('admin'
+        appears only in the URL, which Quartz does not expose), so the
+        teleprompter mirrored live.slop.computer/admin.
+
+    The pattern is that any heuristic here fires exactly when the layout is
+    already wrong, and picks from a set full of near-identical decoys. So: match
+    the rect or return None and let the caller warn. Binding nothing costs two
+    clicks in OBS; binding the wrong window looks fine to the script and puts the
+    admin page on the CF15T.
+    """
     if TELE_RECT is None:
         return None
     skip = slop_chrome_pids() | {FRONT_PID, RENDER_PID}
     x, y, wid, hgt = TELE_RECT
-    at_rect, newest_big = None, None
+    at_rect = None
     for w in window_list():
         if w.get("kCGWindowLayer", 0) != 0:
             continue
@@ -126,10 +143,7 @@ def find_control_window():
                 and abs(b.get("Width", 0) - wid) <= BOUNDS_TOL and abs(b.get("Height", 0) - hgt) <= BOUNDS_TOL):
             if at_rect is None or n > at_rect:
                 at_rect = n
-        if b.get("Width", 0) >= 700 and b.get("Height", 0) >= 500:
-            if newest_big is None or n > newest_big:
-                newest_big = n
-    return at_rect if at_rect is not None else newest_big
+    return at_rect
 
 def patch(window_ids, tele_id):
     with open(OBS_SCENE) as f:
@@ -144,11 +158,19 @@ def patch(window_ids, tele_id):
             source["settings"]["type"] = 1  # window capture
             print(f"  {name}: {old} -> {window_ids[name]}")
     projectors = data.setdefault("saved_projectors", [])
-    have = {(p.get("name"), p.get("type")) for p in projectors}
+    have = {(p.get("name"), p.get("type")): p for p in projectors}
     for dflt in PROJECTOR_DEFAULTS:
-        if (dflt["name"], dflt["type"]) not in have:
+        existing = have.get((dflt["name"], dflt["type"]))
+        if existing is None:
             projectors.append(dict(dflt))
             print(f"  saved_projectors: re-added {dflt['name']!r} (monitor {dflt['monitor']})")
+        elif existing.get("monitor") != dflt["monitor"]:
+            # Entry survives but drifted to another display (dragging the
+            # projector re-saves its monitor on OBS exit) — force it back.
+            print(f"  saved_projectors: {dflt['name']!r} monitor "
+                  f"{existing.get('monitor')} -> {dflt['monitor']}")
+            existing["monitor"] = dflt["monitor"]
+            existing["geometry"] = dflt["geometry"]
     with open(OBS_SCENE, "w") as f:
         json.dump(data, f, indent=4)
 
