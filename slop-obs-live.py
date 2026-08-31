@@ -149,15 +149,18 @@ def main():
                 blank.append(name)
         if blank:
             print(f"\n  !! {', '.join(blank)}: capture attached but OBS is "
-                  "getting BLANK frames.")
-            print("  !! Likely macOS screen-recording approval gone stale:")
-            print("  !!   System Settings > Privacy & Security > Screen & System")
-            print("  !!   Audio Recording > toggle OBS off/on, relaunch OBS.")
-            print("  !!   (A reboot also clears it.)")
+                  "getting BLANK frames (exit 3 — caller should restart OBS).")
+            return "blank"
         return ok
 
-    ok = asyncio.run(obs_session(repoint))
-    sys.exit(0 if ok else 1)
+    result = asyncio.run(obs_session(repoint))
+    # exit 3 = settings applied but SCK delivers no pixels. Seen when OBS is
+    # relaunched too soon after the previous instance died, and when macOS 26's
+    # periodic screen-recording re-approval goes stale. An OBS restart (with a
+    # few seconds' gap) fixes the former; only the System Settings toggle fixes
+    # the latter. slop-lite.sh restarts OBS once on exit 3, then points at the
+    # toggle if it is still blank.
+    sys.exit(3 if result == "blank" else 0 if result else 1)
 
 
 if __name__ == "__main__":
