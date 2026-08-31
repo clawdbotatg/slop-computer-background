@@ -29,10 +29,13 @@ it never clobbers your stream key.
 | File | Role |
 |---|---|
 | `slop-setup.sh` | The bootstrapper SLOP.app runs in iTerm2 — kills stale instances, serves this folder on :9911, opens the capture windows, patches the scene, launches OBS, runs the detector |
+| `slop-lite.sh` | Mid-call recovery, run by SLOP-Lite.app: restarts ONLY foreground + background + detector, re-pointing OBS live over obs-websocket (`slop-obs-live.py`) — OBS, main Chrome, control tabs and hands monitor untouched |
+| `slop-config.sh` | Shared window geometry / ports / profiles, sourced by both scripts |
 | `foreground.html` / `background.html` | The two 16:9 pages OBS window-captures |
 | `hands.html` | Hand-landmark monitor window |
 | `slop-server.py` | Static server + event relay (`/spawn`, `/events`, `/hands`) |
-| `slop-obs-patch.py` | Rewrites the Rig2 scene's window-capture IDs by PID (needs pyobjc/Quartz) |
+| `slop-obs-patch.py` | Rewrites the Rig2 scene's window-capture IDs by PID (needs pyobjc/Quartz; OBS must be closed) |
+| `slop-obs-live.py` | Same re-point while OBS is RUNNING, via obs-websocket (needs the `websockets` pip package + OBS Tools → WebSocket Server enabled) |
 | `slop-detector.swift` | Hand detector — reads the OBS source projector, POSTs landmarks; built automatically by `slop-setup.sh` |
 | `rig/` | The installable payload: app bundles, OBS profile/scene templates, the cockpit mp4 |
 | `install.sh` | New-machine setup (see above) |

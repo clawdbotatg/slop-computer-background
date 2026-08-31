@@ -24,34 +24,9 @@
 
 set -u
 
-# ── CONFIG ──────────────────────────────────────────────────────────────────────
+# ── CONFIG (shared with slop-lite.sh — see slop-config.sh) ──────────────────────
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PORT=9911
-BASE="http://localhost:${PORT}"
-CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-PROFILE_FG="$HOME/.slop-chrome-fg"
-PROFILE_BG="$HOME/.slop-chrome-bg"
-PROFILE_MON="$HOME/.slop-chrome-mon"   # the hands.html monitor window (its own killable profile)
-
-# Per-window size + position (top-left x,y), captured from where you placed them.
-# Foreground is intentionally a touch taller than the background.
-FG_X=-2430; FG_Y=454; FG_W=1280; FG_H=766
-BG_X=-2495; BG_Y=409; BG_W=1280; BG_H=748
-# hands.html monitor — where you placed it
-MON_X=-2548; MON_Y=1181; MON_W=960; MON_H=560
-# iTerm window (running this script + the detector) — set by SLOP.app's launcher too
-ITERM_BOUNDS="-2549, 537, -1930, 1067"
-
-# ── CONTROL WINDOW (main Chrome) ────────────────────────────────────────────────
-# These four URLs open as TABS in ONE main-Chrome window, positioned at:
-# {Left, Top, Right, Bottom}. Adjust after you see it.
-CONTROL_BOUNDS="166, 371, 1698, 1247"
-CONTROL_URLS=(
-  "https://slop.computer/"
-  "https://slop.computer/admin"
-  "https://slop.computer/checklist"
-  "https://live.slop.computer/admin"
-)
+source "$DIR/slop-config.sh"
 
 # ── --capture helper: dump current main-Chrome window bounds, then exit ─────────
 if [ "${1:-}" = "--capture" ]; then

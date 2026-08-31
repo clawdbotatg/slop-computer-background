@@ -36,16 +36,18 @@ if pgrep -f "OBS.app/Contents/MacOS/OBS" >/dev/null 2>&1; then
 fi
 
 # ── 1. Apps -> Desktop ─────────────────────────────────────────────────────────
-echo "Installing SLOP.app + OBS-SLOP.app to ~/Desktop..."
-for APP in SLOP OBS-SLOP; do
+echo "Installing SLOP.app + SLOP-Lite.app + OBS-SLOP.app to ~/Desktop..."
+for APP in SLOP SLOP-Lite OBS-SLOP; do
   rm -rf "$HOME/Desktop/$APP.app"
   ditto "$RIG/apps/$APP.app" "$HOME/Desktop/$APP.app"
 done
-# bake this repo's location into the SLOP launcher
-sed -i '' "s|__REPO_DIR__|$REPO_DIR|g" "$HOME/Desktop/SLOP.app/Contents/MacOS/launcher"
+# bake this repo's location into the SLOP + SLOP Lite launchers
+sed -i '' "s|__REPO_DIR__|$REPO_DIR|g" "$HOME/Desktop/SLOP.app/Contents/MacOS/launcher" \
+                                       "$HOME/Desktop/SLOP-Lite.app/Contents/MacOS/launcher"
 chmod +x "$HOME/Desktop/SLOP.app/Contents/MacOS/launcher" \
+         "$HOME/Desktop/SLOP-Lite.app/Contents/MacOS/launcher" \
          "$HOME/Desktop/OBS-SLOP.app/Contents/MacOS/launcher"
-xattr -cr "$HOME/Desktop/SLOP.app" "$HOME/Desktop/OBS-SLOP.app" 2>/dev/null || true
+xattr -cr "$HOME/Desktop/SLOP.app" "$HOME/Desktop/SLOP-Lite.app" "$HOME/Desktop/OBS-SLOP.app" 2>/dev/null || true
 
 # ── 2. OBS profile ─────────────────────────────────────────────────────────────
 echo "Installing OBS profile Rig2..."
@@ -112,10 +114,12 @@ cat <<CHECKLIST
      "a6400 HDMI" capture device and the Syphon client. Open a Windowed
      Projector on the camera source and enable Settings -> General ->
      "Save projectors on exit" (the hand detector reads that projector).
-  5. Window positions in slop-setup.sh were captured on the original
+  5. Window positions in slop-config.sh were captured on the original
      monitor layout. Place windows where you want, then run
        bash $REPO_DIR/slop-setup.sh --capture
-     and copy the bounds into the CONFIG block of slop-setup.sh.
+     and copy the bounds into slop-config.sh.
+  6. For SLOP-Lite.app (mid-call fg/bg/detector recovery without an OBS
+     restart): enable OBS Tools -> WebSocket Server Settings once.
 
-Then: double-click SLOP.app.
+Then: double-click SLOP.app.  (SLOP-Lite.app = mid-call recovery only.)
 CHECKLIST
