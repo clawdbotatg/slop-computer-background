@@ -20,3 +20,6 @@ service.json
 
 # gesture forward config (secret token — never commit)
 .slop-relay.env
+
+# eye secrets (god password) — never commit
+.slop-eye.env

@@ -24,6 +24,9 @@ let TARGET_APP   = args.count > 1 ? args[1] : "OBS"
 let TARGET_TITLE = args.count > 2 ? args[2] : "Projector"
 let POST_URL     = URL(string: args.count > 3 ? args[3] : "http://localhost:9911/hands")!
 let FPS          = 10
+// Auth for posting to the relay's /v1/hands (the "eye" pipeline). Unset when
+// posting to the local slop-server, which needs none.
+let GESTURE_KEY  = ProcessInfo.processInfo.environment["SLOP_GESTURE_KEY"]
 
 // Vision joints in MediaPipe's 0..20 index order so the browser's existing
 // finger-count/gesture logic works unchanged.
@@ -41,7 +44,7 @@ final class Detector: NSObject, SCStreamOutput, SCStreamDelegate {
     let session = URLSession(configuration: .ephemeral)
     let handReq: VNDetectHumanHandPoseRequest = {
         let r = VNDetectHumanHandPoseRequest()
-        r.maximumHandCount = 2
+        r.maximumHandCount = 6   // the eye watches the whole room — host + guests
         return r
     }()
     let queue = DispatchQueue(label: "slop.detector")
@@ -130,9 +133,11 @@ final class Detector: NSObject, SCStreamOutput, SCStreamDelegate {
             }
         }
 
+        let capW = CVPixelBufferGetWidth(px)
+        let capH = CVPixelBufferGetHeight(px)
         let handler = VNImageRequestHandler(cvPixelBuffer: px, orientation: .up, options: [:])
         do { try handler.perform([handReq]) } catch { return }
-        guard let results = handReq.results, !results.isEmpty else { post(hands: []); return }
+        guard let results = handReq.results, !results.isEmpty else { post(hands: [], w: capW, h: capH); return }
 
         var hands: [[String: Any]] = []
         for obs in results {
@@ -149,7 +154,7 @@ final class Detector: NSObject, SCStreamOutput, SCStreamDelegate {
             let chir: String = obs.chirality == .left ? "left" : (obs.chirality == .right ? "right" : "unknown")
             hands.append(["chirality": chir, "lm": lm])
         }
-        post(hands: hands)
+        post(hands: hands, w: capW, h: capH)
         frame += 1
         if frame % FPS == 0 {  // ~once per second
             let labels = hands.map { ($0["chirality"] as? String) ?? "?" }.joined(separator: ",")
@@ -157,12 +162,13 @@ final class Detector: NSObject, SCStreamOutput, SCStreamDelegate {
         }
     }
 
-    func post(hands: [[String: Any]]) {
-        guard let data = try? JSONSerialization.data(withJSONObject: ["hands": hands]) else { return }
+    func post(hands: [[String: Any]], w: Int, h: Int) {
+        guard let data = try? JSONSerialization.data(withJSONObject: ["hands": hands, "w": w, "h": h]) else { return }
         var req = URLRequest(url: POST_URL)
         req.httpMethod = "POST"
         req.httpBody = data
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let key = GESTURE_KEY { req.setValue(key, forHTTPHeaderField: "X-Gesture-Key") }
         session.dataTask(with: req).resume()
     }
 
