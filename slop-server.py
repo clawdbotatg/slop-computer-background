@@ -45,7 +45,7 @@ def _load_relay_cfg():
     return (url.rstrip('/'), tok, room, anchor) if url and tok and room else None
 
 RELAY = _load_relay_cfg()
-RELAY_KINDS = {'eth', 'claw'}       # relay rejects anything else; 'computer' stays local-only
+RELAY_KINDS = {'eth', 'claw', 'computer'}
 RELAY_MIN_GAP = 0.4                 # s between forwards — the fist stream fires every 150ms,
                                     # which would drain the relay's chat rate bucket
 _relay_q = queue.Queue(maxsize=8)   # bounded fire-and-forget; drop rather than back up the rig
