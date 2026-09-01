@@ -19,13 +19,14 @@ URL="${1:-}"
 
 BASE="https://live.slop.computer"
 SLUG=$(echo "$URL" | sed -E 's|https?://[^/]+/([^/?]+).*|\1|')
-[ -n "$SLUG" ] || { echo "could not parse slug from URL"; exit 1; }
+INVITE=$(echo "$URL" | sed -nE 's|.*[?&]invite=([^&]+).*|\1|p')
+[ -n "$SLUG" ] && [ -n "$INVITE" ] || { echo "could not parse slug/invite from URL"; exit 1; }
 
 # shellcheck disable=SC1091
 source "$DIR/.slop-eye.env" 2>/dev/null || true
 [ -n "${SLOP_GOD_PASSWORD:-}" ] || { echo "missing SLOP_GOD_PASSWORD in $DIR/.slop-eye.env"; exit 1; }
 
-EYE_URL="$BASE/$SLUG?godMode=$SLOP_GOD_PASSWORD&fx=0"
+EYE_URL="$BASE/$SLUG?invite=$INVITE&godMode=$SLOP_GOD_PASSWORD&fx=0"
 PROFILE="$HOME/.slop-eye-chrome"
 
 # Fresh detector build if the source is newer (same rule as slop-setup.sh).
