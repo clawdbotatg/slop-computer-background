@@ -46,18 +46,25 @@ def _load_relay_cfg():
 
 RELAY = _load_relay_cfg()
 RELAY_KINDS = {'eth', 'claw', 'computer'}
-RELAY_MIN_GAP = 0.4                 # s between forwards — the fist stream fires every 150ms,
-                                    # which would drain the relay's chat rate bucket
+# Token bucket: bursts pass (two hands release claws milliseconds apart — a
+# flat min-gap ate the second one), sustained streams get throttled to 1/s so
+# the fist's 150ms eth stream can't drain the relay's chat bucket (burst 5,
+# refill 1/s — our burst must stay below its).
+RELAY_BURST = 3.0
+RELAY_REFILL_PER_S = 1.0
 _relay_q = queue.Queue(maxsize=8)   # bounded fire-and-forget; drop rather than back up the rig
 
 def _relay_worker():
     url, tok, room, anchor = RELAY
-    last_sent = 0.0
+    tokens, last = RELAY_BURST, time.monotonic()
     while True:
         body = _relay_q.get()
         now = time.monotonic()
-        if now - last_sent < RELAY_MIN_GAP:
+        tokens = min(RELAY_BURST, tokens + (now - last) * RELAY_REFILL_PER_S)
+        last = now
+        if tokens < 1:
             continue
+        tokens -= 1
         try:
             d = json.loads(body)
             if d.get('kind') not in RELAY_KINDS:
