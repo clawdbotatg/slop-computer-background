@@ -44,7 +44,7 @@ triggers gestures with zero setup.
   `packages/relay/src/gestures.ts` is a direct port and any tuning change
   should be reasoned against this original.
 
-## Gestures (unchanged since the OBS rig)
+## Gestures
 
 - ✊ fist → eth drops (streams while held, fires instantly)
 - 🤘 horns → eth held on the hand, released to fly away
@@ -52,6 +52,11 @@ triggers gestures with zero setup.
   from ✌️) → live claw, jaw follows your pinch
 - 📐 two L-hands framing → the slop computer logo; on release it zooms at
   the screen
+- 🫶 two-hand heart (index tips together on top, thumb tips together
+  below, palms apart) → glowing heart between your hands, little hearts
+  float out the top; the big heart floats away on release. **Relay-only**
+  — added after the OBS rig retired, so foreground.html has no reference
+  implementation for it (the four above are still 1:1 with it).
 
 ## Debugging quickies
 
