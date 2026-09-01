@@ -72,6 +72,7 @@ final class Detector: NSObject, SCStreamOutput, SCStreamDelegate {
                 return owner.localizedCaseInsensitiveContains(TARGET_APP)
                     && (TARGET_TITLE.isEmpty || title.localizedCaseInsensitiveContains(TARGET_TITLE))
                     && $0.frame.width > 40 && $0.frame.height > 40
+                    && $0.isOnScreen   // a projector stranded on an inactive Space matches too but never repaints — zero frames
             }.sorted { $0.frame.width * $0.frame.height > $1.frame.width * $1.frame.height }
 
             guard let win = windows.first else {
