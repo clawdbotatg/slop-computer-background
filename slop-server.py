@@ -24,12 +24,27 @@ clients_lock = threading.Lock()
 class Handler(SimpleHTTPRequestHandler):
     def log_message(self, *a): pass  # quiet
 
+    # Chrome Private Network Access: a public https page (live.slop.computer)
+    # fetching a localhost resource sends a CORS preflight with
+    # Access-Control-Request-Private-Network and blocks unless we answer it.
+    # Needed so the room page can read /hands.sse (the in-page gesture bridge).
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self._cors()
+        self.end_headers()
+
+    def _cors(self):
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', '*')
+        self.send_header('Access-Control-Allow-Private-Network', 'true')
+
     def _sse(self, channel):
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
         self.send_header('Cache-Control', 'no-cache')
         self.send_header('Connection', 'keep-alive')
-        self.send_header('Access-Control-Allow-Origin', '*')
+        self._cors()
         self.end_headers()
         q = queue.Queue(maxsize=4)  # bounded so a slow client can't back up the hand stream
         with clients_lock:
@@ -59,7 +74,7 @@ class Handler(SimpleHTTPRequestHandler):
                 try: q.get_nowait(); q.put_nowait(body)  # drop oldest, keep latest
                 except queue.Empty: pass
         self.send_response(204)
-        self.send_header('Access-Control-Allow-Origin', '*')
+        self._cors()
         self.end_headers()
 
     def do_GET(self):
