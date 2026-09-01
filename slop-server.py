@@ -38,7 +38,11 @@ def _load_relay_cfg():
         pass
     cfg.update({k: v for k, v in os.environ.items() if k.startswith('SLOP_RELAY_')})
     url, tok, room = cfg.get('SLOP_RELAY_URL'), cfg.get('SLOP_RELAY_TOKEN'), cfg.get('SLOP_RELAY_ROOM')
-    return (url.rstrip('/'), tok, room) if url and tok and room else None
+    # SLOP_RELAY_ANCHOR: whose camera window effects anchor to (the host's
+    # handle/address) — the rig's agent token is an anon session, so without
+    # this the shared desktop can't find the right window and shows nothing.
+    anchor = cfg.get('SLOP_RELAY_ANCHOR', '')
+    return (url.rstrip('/'), tok, room, anchor) if url and tok and room else None
 
 RELAY = _load_relay_cfg()
 RELAY_KINDS = {'eth', 'claw'}       # relay rejects anything else; 'computer' stays local-only
@@ -47,7 +51,7 @@ RELAY_MIN_GAP = 0.4                 # s between forwards — the fist stream fir
 _relay_q = queue.Queue(maxsize=8)   # bounded fire-and-forget; drop rather than back up the rig
 
 def _relay_worker():
-    url, tok, room = RELAY
+    url, tok, room, anchor = RELAY
     last_sent = 0.0
     while True:
         body = _relay_q.get()
@@ -58,7 +62,10 @@ def _relay_worker():
             d = json.loads(body)
             if d.get('kind') not in RELAY_KINDS:
                 continue
-            payload = json.dumps({k: d[k] for k in ('kind', 'x', 'y', 's', 'spin', 'angle', 'open') if k in d}).encode()
+            out = {k: d[k] for k in ('kind', 'x', 'y', 's', 'spin', 'angle', 'open') if k in d}
+            if anchor:
+                out['anchor'] = anchor
+            payload = json.dumps(out).encode()
             req = urllib.request.Request(
                 f'{url}/v1/gesture?slug={room}', data=payload,
                 headers={'Authorization': f'Bearer {tok}', 'Content-Type': 'application/json'})
