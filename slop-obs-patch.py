@@ -27,9 +27,8 @@ are excluded by inspecting each owner PID's command line.
 Also enforced on every run (all of this only sticks while OBS is CLOSED):
   • SaveProjectors=true in obs-studio/user.ini — without it OBS neither
     restores saved projectors on launch nor saves them on exit, which silently
-    kills both the hand detector's source projector and the CF15T teleprompter.
-  • saved_projectors entries for the "teleprompter" fullscreen scene projector
-    (CF15T) and the "a6400 HDMI" windowed source projector (the hand detector
+    kills the hand detector's source projector.
+  • a saved_projectors entry for the "a6400 HDMI" windowed source projector (the hand detector
     reads that one). Existing entries are left alone (so you can reposition
     them); they're only re-added if missing.
 
@@ -44,10 +43,9 @@ OBS_USER_INI = os.path.expanduser("~/Library/Application Support/obs-studio/user
 TELE_SOURCE = "macOS Screen Capture"   # the capture source inside the teleprompter scene
 BOUNDS_TOL = 12                        # px slack when matching the control window
 
-# Known-good saved-projector snapshots (captured 2026-08-02 on this machine's
-# monitor layout: monitor 1 == CF15T 1920x1080). Only used when the entry has
-# gone missing from the scene JSON — e.g. the projector was closed before OBS
-# exited, so OBS saved the collection without it.
+# Known-good saved-projector snapshot (captured 2026-08-02). Only used when the
+# entry has gone missing from the scene JSON — e.g. the projector was closed
+# before OBS exited, so OBS saved the collection without it.
 PROJECTOR_DEFAULTS = [
     {
         "name": "a6400 HDMI",
@@ -56,14 +54,12 @@ PROJECTOR_DEFAULTS = [
         "geometry": "AdnQywADAAD///gtAAAFb///+gwAAAad///4LQAABY////oMAAAGnQAAAAIAAAAACgD///gtAAAFj///+gwAAAad",
         "alwaysOnTopOverridden": False,
     },
-    {
-        "name": "teleprompter",
-        "monitor": 1,    # fullscreen Scene projector on the CF15T
-        "type": 1,
-        "geometry": "AdnQywADAAAAAAoAAAABaAAAEX8AAAWfAAAKAAAAAWgAABF/AAAFnwAAAAEABAAAB4AAAAoAAAABaAAAEX8AAAWf",
-        "alwaysOnTopOverridden": False,
-    },
 ]
+# Projectors that must NOT be auto-restored. The fullscreen "teleprompter" scene
+# projector used to live here (CF15T era); Austin retired it 2026-09-02 — OBS's
+# "monitor 1" is now the LG, so restoring it blanketed the whole LG display.
+# OBS saves whatever projectors are open on exit, so scrub it every run.
+PROJECTOR_BANNED = {("teleprompter", 1)}   # (name, type)  type 1 == Scene projector
 
 if len(sys.argv) < 3:
     print("usage: slop-obs-patch.py <foreground_pid> <background_pid> [--teleprompter 'L, T, R, B']")
@@ -158,6 +154,9 @@ def patch(window_ids, tele_id):
             source["settings"]["type"] = 1  # window capture
             print(f"  {name}: {old} -> {window_ids[name]}")
     projectors = data.setdefault("saved_projectors", [])
+    for p in [p for p in projectors if (p.get("name"), p.get("type")) in PROJECTOR_BANNED]:
+        projectors.remove(p)
+        print(f"  saved_projectors: removed banned {p.get('name')!r} (monitor {p.get('monitor')})")
     have = {(p.get("name"), p.get("type")): p for p in projectors}
     for dflt in PROJECTOR_DEFAULTS:
         existing = have.get((dflt["name"], dflt["type"]))

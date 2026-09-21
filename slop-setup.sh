@@ -487,8 +487,8 @@ echo "  foreground pid=$FG_PID  background pid=$BG_PID"
 # ── PATCH the Rig2 (SLOP) scene with the new window IDs (OBS must be closed) ─────
 # Also re-points the teleprompter scene's screen capture at the control window
 # (its window ID rotates every launch), enforces SaveProjectors=true, and makes
-# sure the teleprompter fullscreen projector (CF15T) + a6400 windowed projector
-# are in saved_projectors so OBS reopens them on start.
+# sure the a6400 windowed projector is in saved_projectors (and the retired
+# fullscreen "teleprompter" projector is NOT) so OBS reopens the right ones.
 echo "Patching OBS Rig2 scene (sloptubefront / sloptuberender / teleprompter)..."
 python3 "$DIR/slop-obs-patch.py" "$FG_PID" "$BG_PID" --teleprompter "$CONTROL_BOUNDS" || { echo "Patch failed — are both windows open?"; }
 
@@ -516,7 +516,7 @@ open -n -a "Google Chrome" --args --user-data-dir="$PROFILE_MON" \
 echo ""
 echo "SLOP rig up."
 echo "  • OBS sources: sloptubefront → SLOPTUBE-FRONT,  sloptuberender → SLOPTUBE-BG"
-echo "  • teleprompter scene → slop.computer control window; projector on CF15T"
+echo "  • teleprompter scene → slop.computer control window (no fullscreen projector)"
 echo "  • Hand monitor window open (hands.html)"
 echo "  • Desktop 2: YouTube Studio (Canary) + X Live Studio + slop.computer/admin + live.slop.computer/admin"
 echo "  • Guest room (live.slop.computer/<slug>) is still opened by hand"
