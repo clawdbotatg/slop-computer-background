@@ -12,6 +12,21 @@ PROFILE_FG="$HOME/.slop-chrome-fg"
 PROFILE_BG="$HOME/.slop-chrome-bg"
 PROFILE_MON="$HOME/.slop-chrome-mon"   # the hands.html monitor window (its own killable profile)
 
+# The OBS window the hand detector reads: the Windowed Projector of the clean
+# camera source ("Projector - Source: a6400 HDMI"). Substring match, and the
+# detector takes the LARGEST matching window — so this has to name the source,
+# not just "Source": on 2026-09-21 four "Projector - Source: macOS Screen
+# Capture" windows (1920x1050) out-sized the camera projector (480x302) and the
+# detector spent the day watching a black frame. Must match the source name in
+# slop-obs-patch.py / the Rig2 scene.
+# The detector sizes its capture ONCE at attach and never follows a resize: a
+# projector shrunk afterwards gets painted top-left into the old, bigger buffer
+# (black padding below) and every effect lands well ABOVE the hand (2026-09-21,
+# ~30% north). Resize the projector, then re-run SLOP-Lite. The durable fix is
+# normalizing by SCStreamFrameInfo.contentRect in slop-detector.swift — but a
+# rebuild re-triggers the Screen Recording approval, so not on a show day.
+DETECTOR_TITLE="Source: a6400 HDMI"
+
 # Per-window size + position (top-left x,y), captured from where you placed them.
 # Foreground is intentionally a touch taller than the background.
 #

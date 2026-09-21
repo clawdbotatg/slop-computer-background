@@ -531,13 +531,15 @@ osascript -e "tell application \"iTerm2\" to set bounds of current window to {$I
 # that projector window exists, so:
 #   • Open the camera source's Windowed Projector once, and enable OBS → Settings →
 #     General → "Save projectors on exit" so OBS reopens it automatically.
-# Title filter is "Source" (not "Projector"): OBS also restores "Projector -
-# Preview" windows, and a phantom one from a missing display once out-sized the
-# real feed and delivered zero frames — Source projectors match, Preview never.
+# Title filter is DETECTOR_TITLE (slop-config.sh) — the camera SOURCE by name,
+# not "Projector" or a bare "Source": the detector takes the largest match, and
+# both a phantom "Projector - Preview" from a missing display and, later, the
+# "Projector - Source: macOS Screen Capture" windows have out-sized the real
+# feed and delivered black/zero frames.
 # Ctrl-C here stops the detector. Closing this window ends the session's hand input.
 if [ -x "$DIR/slop-detector" ]; then
   echo "Starting hand detector in this terminal (Ctrl-C to stop)..."
-  exec "$DIR/slop-detector" OBS "Source"
+  exec "$DIR/slop-detector" OBS "$DETECTOR_TITLE"
 else
   echo "slop-detector not built — hand detection won't run."
 fi

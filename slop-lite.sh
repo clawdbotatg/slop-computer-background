@@ -143,7 +143,7 @@ osascript -e "tell application \"iTerm2\" to set bounds of current window to {$I
 # ── RUN the hand detector in THIS terminal (Ctrl-C stops it) ───────────────────
 if [ -x "$DIR/slop-detector" ]; then
   echo "Starting hand detector in this terminal (Ctrl-C to stop)..."
-  exec "$DIR/slop-detector" OBS "Source"
+  exec "$DIR/slop-detector" OBS "$DETECTOR_TITLE"
 else
   echo "slop-detector not built — hand detection won't run."
 fi
